@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: snappyconnect-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: snappyconnect
+    ports:
+      - '5432:5432'
+    volumes:
+      - snappyconnect_pgdata:/var/lib/postgresql/data
+
+volumes:
+  snappyconnect_pgdata:

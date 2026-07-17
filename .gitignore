@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pub-cache/
+
+# Builds
+dist/
+.next/
+build/
+
+# Environment
+.env
+.env.local
+*.env.production
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins*
+*.iml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log

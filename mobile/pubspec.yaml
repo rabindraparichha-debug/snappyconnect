@@ -1,0 +1,27 @@
+name: snappyconnect_mobile
+description: "SnappyConnect mobile app — multi-provider calling for Android & iOS."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.0
+  shared_preferences: ^2.2.0
+  url_launcher: ^6.3.0
+  call_log: ^5.0.0
+  permission_handler: ^12.0.0
+  intl: ^0.20.0
+  telnyx_webrtc: ^4.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

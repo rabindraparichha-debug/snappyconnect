@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="white" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/>
+      </svg>
+    </div>
+    <span class="logo-text">Snappy<b>Connect</b></span>
+  </div>
+
+  <div id="login-view" class="view">
+    <label>API URL</label>
+    <input id="api-url" type="text" placeholder="http://localhost:4000/api/v1" />
+    <label>Email</label>
+    <input id="email" type="email" placeholder="you@company.com" />
+    <label>Password</label>
+    <input id="password" type="password" placeholder="••••••••" />
+    <button id="login-btn">Sign in</button>
+    <p id="login-error" class="error hidden"></p>
+  </div>
+
+  <div id="user-view" class="view hidden">
+    <p class="signed-in">Signed in as</p>
+    <p id="user-name" class="user-name"></p>
+    <p id="user-email" class="user-email"></p>
+    <div class="quick-call">
+      <input id="quick-number" type="tel" placeholder="+1 555 000 1234" />
+      <button id="quick-call-btn" title="Call">Call</button>
+    </div>
+    <p id="call-result" class="result hidden"></p>
+    <button id="logout-btn" class="secondary">Sign out</button>
+  </div>
+
+  <p class="hint">Phone numbers on web pages get a green call button.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
