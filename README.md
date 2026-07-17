@@ -20,7 +20,7 @@ Providers are pluggable strategies behind one interface ([`provider.interface.ts
 | Region | Provider | How a call flows | Action |
 |---|---|---|---|
 | 🇺🇸 USA | **Telnyx** | Browser/mobile dials over WebRTC with a short-lived token minted by the API. SMS via Telnyx Messages API. Webhooks reconcile call status. | `client_dial` |
-| 🇦🇪 UAE | **Grandstream PBX + Dinstar** | API originates via the UCM HTTPS API: PBX rings the user's extension, then dials out through the Dinstar trunk. | `pbx_originated` |
+| 🇦🇪 UAE | **Grandstream PBX + Dinstar** | All UAE users share a single Wave extension (configured in Settings). API originates via the UCM HTTPS API: PBX rings the shared extension, then dials out through the Dinstar trunk. One call at a time; SnappyConnect tracks which user initiated each call. | `pbx_originated` |
 | 🇮🇳 India | **Native Mobile Dialer** | No VoIP. API queues a call request; the Flutter app polls, opens the native dialer (user's own SIM), then syncs duration & outcome back. | `queued_to_mobile` |
 
 To add a provider: implement `CallingProviderStrategy`, register it in [`providers.service.ts`](backend/src/providers/providers.service.ts), and add its settings namespace.
@@ -76,7 +76,7 @@ flutter run          # emulator: use http://10.0.2.2:4000/api/v1 as the server U
 Under **Settings** (admin only), stored AES-256-GCM-encrypted at rest:
 
 - **Telnyx** — API key, telephony credential ID (WebRTC tokens), connection ID, default from-number, messaging profile (SMS).
-- **Grandstream PBX** — host, API port (8089), API username/password, optional outbound prefix. Per-user extensions are set in User Management.
+- **Grandstream PBX** — host, API port (8089), API username/password, shared Wave extension (e.g. 101), optional outbound prefix. All UAE users call through this single extension.
 - **Dinstar** — gateway host/credentials, stored for reference (it is trunked to the PBX; calls don't hit it directly).
 
 Configure the Telnyx webhook to `https://<your-host>/api/v1/webhooks/telnyx` to reconcile call statuses and durations.

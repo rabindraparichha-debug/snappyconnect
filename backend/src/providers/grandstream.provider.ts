@@ -15,11 +15,10 @@ import {
 /**
  * Grandstream UCM PBX + Dinstar gateway (UAE).
  *
- * Outbound calls are originated through the UCM HTTPS API: the PBX first
- * rings the user's extension, then dials the destination through the trunk
- * (Dinstar GSM/FXO gateway). The Dinstar itself is registered to the PBX as
- * a trunk, so no direct Dinstar API calls are needed for calling — its
- * connection details are stored in Settings for reference.
+ * A single shared Wave extension (configured in Settings) is used by all
+ * UAE users. The PBX rings that extension, then dials out through the
+ * Dinstar trunk. Only one call at a time is possible on the shared
+ * extension; SnappyConnect tracks which user initiated each call.
  */
 @Injectable()
 export class GrandstreamProvider implements CallingProviderStrategy {
@@ -39,10 +38,10 @@ export class GrandstreamProvider implements CallingProviderStrategy {
         'Grandstream PBX is not configured. Ask an admin to add PBX details in Settings.',
       );
     }
-    const extension: string | undefined = input.user.providerConfig?.extension;
+    const extension: string | undefined = cfg.extension;
     if (!extension) {
       throw new BadRequestException(
-        'No PBX extension assigned to this user. An admin can set it in User Management.',
+        'No shared Wave extension configured. Ask an admin to set it in Settings → Grandstream PBX.',
       );
     }
 

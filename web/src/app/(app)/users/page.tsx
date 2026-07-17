@@ -14,7 +14,6 @@ interface UserForm {
   country: string;
   role: 'admin' | 'user';
   provider: '' | CallingProvider;
-  extension: string;
   telnyxCredentialId: string;
 }
 
@@ -26,7 +25,6 @@ const EMPTY_FORM: UserForm = {
   country: '',
   role: 'user',
   provider: '',
-  extension: '',
   telnyxCredentialId: '',
 };
 
@@ -84,7 +82,6 @@ export default function UsersPage() {
       country: user.country ?? '',
       role: user.role,
       provider: user.provider ?? '',
-      extension: user.providerConfig?.extension ?? '',
       telnyxCredentialId: user.providerConfig?.telnyxCredentialId ?? '',
     });
     setFormError(null);
@@ -97,9 +94,6 @@ export default function UsersPage() {
     setFormError(null);
 
     const providerConfig: Record<string, string> = {};
-    if (form.provider === 'grandstream' && form.extension) {
-      providerConfig.extension = form.extension;
-    }
     if (form.provider === 'telnyx' && form.telnyxCredentialId) {
       providerConfig.telnyxCredentialId = form.telnyxCredentialId;
     }
@@ -326,16 +320,6 @@ export default function UsersPage() {
               <option value="native_dialer">Native Dialer (India)</option>
             </Select>
           </div>
-          {form.provider === 'grandstream' && (
-            <div>
-              <Label>PBX Extension</Label>
-              <Input
-                placeholder="e.g. 101"
-                value={form.extension}
-                onChange={(e) => setForm({ ...form, extension: e.target.value })}
-              />
-            </div>
-          )}
           {form.provider === 'telnyx' && (
             <div>
               <Label>Telnyx Credential ID (optional)</Label>

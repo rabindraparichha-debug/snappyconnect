@@ -34,12 +34,18 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
   {
     key: 'grandstream',
     title: 'Grandstream PBX (UAE)',
-    description: 'UCM PBX that rings the user extension, then dials out via the trunk.',
+    description: 'UCM PBX with a shared Wave extension. All UAE users call through this extension — one call at a time.',
     fields: [
       { key: 'host', label: 'PBX Host / IP', placeholder: '10.0.0.10' },
       { key: 'port', label: 'API Port', placeholder: '8089' },
       { key: 'username', label: 'API Username' },
       { key: 'password', label: 'API Password', secret: true },
+      {
+        key: 'extension',
+        label: 'Shared Wave Extension',
+        placeholder: '101',
+        hint: 'The extension registered in Wave app. All UAE users share this extension for calling.',
+      },
       {
         key: 'callerPrefix',
         label: 'Outbound Prefix (optional)',
