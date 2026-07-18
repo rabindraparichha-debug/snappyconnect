@@ -71,6 +71,8 @@ class ApiClient {
 
   Future<dynamic> post(String path, {Object? body}) => _request('POST', path, body: body);
 
+  Future<dynamic> patch(String path, {Object? body}) => _request('PATCH', path, body: body);
+
   Future<dynamic> _request(
     String method,
     String path, {
@@ -87,15 +89,19 @@ class ApiClient {
       if (body != null) 'Content-Type': 'application/json',
     };
 
+    final encodedBody = body != null ? jsonEncode(body) : null;
+
     late http.Response res;
     try {
-      if (method == 'GET') {
-        res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 15));
-      } else {
-        res = await http
-            .post(uri, headers: headers, body: body != null ? jsonEncode(body) : null)
-            .timeout(const Duration(seconds: 15));
-      }
+      res = switch (method) {
+        'GET' => await http.get(uri, headers: headers).timeout(const Duration(seconds: 15)),
+        'PATCH' => await http
+            .patch(uri, headers: headers, body: encodedBody)
+            .timeout(const Duration(seconds: 15)),
+        _ => await http
+            .post(uri, headers: headers, body: encodedBody)
+            .timeout(const Duration(seconds: 15)),
+      };
     } catch (_) {
       throw ApiException('Could not reach the SnappyConnect server.');
     }

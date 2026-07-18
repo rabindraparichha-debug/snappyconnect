@@ -8,15 +8,12 @@
 	<array>
 		<string>tel</string>
 	</array>
-	<key>CFBundleDisplayName</key>
-	<string>SnappyConnect</string>
-
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Snappyconnect Mobile</string>
+	<string>SnappyConnect</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

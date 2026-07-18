@@ -44,11 +44,6 @@ class ProfileScreen extends StatelessWidget {
                 _InfoTile(label: 'Mobile Number', value: user.mobileNumber ?? '—'),
                 _InfoTile(label: 'Country', value: user.country ?? '—'),
                 _InfoTile(label: 'Calling Provider', value: user.providerLabel),
-                if (user.provider == 'grandstream')
-                  _InfoTile(
-                    label: 'PBX Extension',
-                    value: (user.providerConfig['extension'] as String?) ?? '—',
-                  ),
                 _InfoTile(label: 'Server', value: ApiClient.instance.baseUrl),
                 const SizedBox(height: 24),
                 OutlinedButton.icon(
