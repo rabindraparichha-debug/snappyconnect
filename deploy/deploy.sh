@@ -9,6 +9,10 @@
 set -euo pipefail
 
 VPS_IP=145.223.18.237
+# Public domain (CloudPanel reverse proxy: / -> web, /api -> backend)
+DOMAIN=call.snappyhires.com
+# 3000/3001/3002 are taken by other apps on this VPS (workhub, etc.)
+WEB_PORT=3003
 SSH_KEY=~/.ssh/snappyconnect_vps
 SSH="ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@$VPS_IP"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,15 +42,15 @@ rsync -az -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-n
   "$REPO_ROOT/deploy/vps-setup.sh" root@$VPS_IP:/opt/snappyconnect/vps-setup.sh
 
 echo "==> 3/4 Running server setup (install deps, build, restart services)"
-$SSH "VPS_IP=$VPS_IP DB_PASSWORD=$DB_PASSWORD JWT_SECRET=$JWT_SECRET \
+$SSH "VPS_IP=$VPS_IP DOMAIN=$DOMAIN WEB_PORT=$WEB_PORT DB_PASSWORD=$DB_PASSWORD JWT_SECRET=$JWT_SECRET \
   SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY ADMIN_PASSWORD=$ADMIN_PASSWORD \
   bash /opt/snappyconnect/vps-setup.sh"
 
 echo "==> 4/4 Health checks"
 sleep 3
 curl -fsS "http://$VPS_IP:4000/api/v1/health" && echo
-curl -fsS -o /dev/null -w "web: %{http_code}\n" "http://$VPS_IP:3000"
+curl -fsS -o /dev/null -w "web: %{http_code}\n" "http://$VPS_IP:$WEB_PORT"
 
 echo
-echo "Deployed. Web: http://$VPS_IP:3000   API: http://$VPS_IP:4000/api/v1"
+echo "Deployed. Web: http://$VPS_IP:$WEB_PORT   API: http://$VPS_IP:4000/api/v1"
 echo "Admin login: admin@snappyconnect.local / (see deploy/.secrets.env ADMIN_PASSWORD)"

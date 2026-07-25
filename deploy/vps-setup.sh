@@ -3,8 +3,17 @@
 # Idempotent: installs Node 20 + PostgreSQL on first run, then (re)builds
 # the backend and web apps and (re)starts their systemd services.
 #
-# Expects env: VPS_IP, DB_PASSWORD, JWT_SECRET, SETTINGS_ENCRYPTION_KEY, ADMIN_PASSWORD
+# Expects env: VPS_IP, WEB_PORT, DB_PASSWORD, JWT_SECRET, SETTINGS_ENCRYPTION_KEY, ADMIN_PASSWORD
 set -euo pipefail
+WEB_PORT=${WEB_PORT:-3003}
+# When DOMAIN is set, public URLs go through the CloudPanel reverse proxy (HTTPS)
+if [ -n "${DOMAIN:-}" ]; then
+  PUBLIC_WEB_URL="https://$DOMAIN"
+  PUBLIC_API_URL="https://$DOMAIN/api/v1"
+else
+  PUBLIC_WEB_URL="http://$VPS_IP:$WEB_PORT"
+  PUBLIC_API_URL="http://$VPS_IP:4000/api/v1"
+fi
 
 APP_DIR=/opt/snappyconnect
 export DEBIAN_FRONTEND=noninteractive
@@ -30,7 +39,7 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='snappyconnec
 echo "--- backend"
 cat > $APP_DIR/backend/.env << EOF
 PORT=4000
-WEB_APP_URL=http://$VPS_IP:3000
+WEB_APP_URL=$PUBLIC_WEB_URL
 DATABASE_HOST=localhost
 DATABASE_PORT=5432
 DATABASE_USER=snappy
@@ -49,7 +58,7 @@ npm ci --no-audit --no-fund
 npm run build
 
 echo "--- web"
-echo "NEXT_PUBLIC_API_URL=http://$VPS_IP:4000/api/v1" > $APP_DIR/web/.env.local
+echo "NEXT_PUBLIC_API_URL=$PUBLIC_API_URL" > $APP_DIR/web/.env.local
 cd $APP_DIR/web
 npm ci --no-audit --no-fund
 npm run build
@@ -78,7 +87,7 @@ After=network.target snappyconnect-api.service
 
 [Service]
 WorkingDirectory=$APP_DIR/web
-ExecStart=$APP_DIR/web/node_modules/.bin/next start -p 3000
+ExecStart=$APP_DIR/web/node_modules/.bin/next start -p $WEB_PORT
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
@@ -93,7 +102,7 @@ systemctl restart snappyconnect-api snappyconnect-web
 
 echo "--- firewall (only touched if ufw is active; CloudPanel rules untouched)"
 if ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow 3000/tcp > /dev/null
+  ufw allow "$WEB_PORT"/tcp > /dev/null
   ufw allow 4000/tcp > /dev/null
 fi
 
