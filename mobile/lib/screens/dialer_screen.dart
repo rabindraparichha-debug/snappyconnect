@@ -36,6 +36,9 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   CallRequest? _activeRequest;
   DateTime? _dialedAt;
 
+  // Set while an inbound (return) call is in progress, so it is logged as such.
+  String? _inboundNumber;
+
   // Polling for click-to-call requests coming from the web / extension.
   Timer? _pollTimer;
   final Set<String> _seenRequests = {};
@@ -46,6 +49,107 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     if (_user?.provider == 'native_dialer') {
       _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollPendingRequests());
+    }
+    if (_user?.provider == 'asterisk') {
+      // Register right away so return calls from candidates ring this device.
+      _connectAsterisk();
+    }
+  }
+
+  /// Keep a SIP registration alive so inbound (return) calls can ring here.
+  Future<void> _connectAsterisk() async {
+    try {
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted) return;
+      final cfg = await ApiClient.instance.get('/calls/asterisk/config') as Map<String, dynamic>;
+      await _asterisk.connect(
+        wssUrl: cfg['wssUrl'] as String,
+        sipDomain: cfg['sipDomain'] as String,
+        sipUsername: cfg['sipUsername'] as String,
+        sipPassword: cfg['sipPassword'] as String,
+        displayName: (cfg['displayName'] as String?) ?? 'SnappyConnect',
+        onState: _onAsteriskState,
+        onIncoming: _onIncomingCall,
+      );
+      if (mounted) setState(() => _status = 'Ready for calls');
+    } catch (_) {
+      // Not fatal: outbound dialing will retry the connection.
+    }
+  }
+
+  Future<void> _onIncomingCall(dynamic call, String fromNumber) async {
+    if (!mounted) return;
+    final accept = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Incoming call'),
+        content: Text(fromNumber),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(context, false),
+            icon: const Icon(Icons.call_end, color: Color(0xFFE11D48)),
+            label: const Text('Decline'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669)),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.call),
+            label: const Text('Answer'),
+          ),
+        ],
+      ),
+    );
+
+    if (accept == true) {
+      _inboundNumber = fromNumber;
+      _telnyxDialedAt = DateTime.now();
+      _telnyxAnsweredAt = null;
+      setState(() {
+        _inTelnyxCall = true;
+        _status = 'Connecting…';
+      });
+      _asterisk.answer(call);
+    } else {
+      _asterisk.decline(call);
+    }
+  }
+
+  void _onAsteriskState(AsteriskCallUiState state, String? detail) {
+    if (!mounted) return;
+    final number = _inboundNumber ?? _numberController.text.trim();
+    switch (state) {
+      case AsteriskCallUiState.registering:
+        setState(() => _status = 'Connecting to call server…');
+      case AsteriskCallUiState.connecting:
+        setState(() => _status = 'Connecting…');
+      case AsteriskCallUiState.ringing:
+        setState(() => _status = 'Ringing…');
+      case AsteriskCallUiState.active:
+        _telnyxAnsweredAt ??= DateTime.now();
+        _elapsedTimer?.cancel();
+        _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (mounted && _telnyxAnsweredAt != null) {
+            setState(() => _elapsed = DateTime.now().difference(_telnyxAnsweredAt!).inSeconds);
+          }
+        });
+        setState(() {
+          _inTelnyxCall = true;
+          _status = 'In call';
+        });
+      case AsteriskCallUiState.ended:
+        _finishVoipCall(number, inbound: _inboundNumber != null);
+        _inboundNumber = null;
+      case AsteriskCallUiState.error:
+        if (_telnyxAnsweredAt != null) {
+          _finishVoipCall(number, inbound: _inboundNumber != null);
+          _inboundNumber = null;
+        } else {
+          setState(() {
+            _inTelnyxCall = false;
+            _status = detail ?? 'Call error';
+          });
+        }
     }
   }
 
@@ -327,43 +431,11 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
       sipPassword: cfg['sipPassword'] as String,
       displayName: (cfg['displayName'] as String?) ?? 'SnappyConnect',
       destination: number,
-      onState: (state, detail) {
-        if (!mounted) return;
-        switch (state) {
-          case AsteriskCallUiState.registering:
-            setState(() => _status = 'Connecting to call server…');
-          case AsteriskCallUiState.connecting:
-            setState(() => _status = 'Connecting…');
-          case AsteriskCallUiState.ringing:
-            setState(() => _status = 'Ringing…');
-          case AsteriskCallUiState.active:
-            _telnyxAnsweredAt ??= DateTime.now();
-            _elapsedTimer?.cancel();
-            _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-              if (mounted && _telnyxAnsweredAt != null) {
-                setState(() =>
-                    _elapsed = DateTime.now().difference(_telnyxAnsweredAt!).inSeconds);
-              }
-            });
-            setState(() => _status = 'In call');
-          case AsteriskCallUiState.ended:
-            _finishVoipCall(number);
-          case AsteriskCallUiState.error:
-            if (_telnyxAnsweredAt != null) {
-              // Mid-call drop: still log what we know.
-              _finishVoipCall(number);
-            } else {
-              setState(() {
-                _inTelnyxCall = false;
-                _status = detail ?? 'Call error';
-              });
-            }
-        }
-      },
+      onState: _onAsteriskState,
     );
   }
 
-  Future<void> _finishVoipCall(String number) async {
+  Future<void> _finishVoipCall(String number, {bool inbound = false}) async {
     _elapsedTimer?.cancel();
     final answered = _telnyxAnsweredAt != null;
     final duration =
@@ -377,8 +449,8 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     try {
       await ApiClient.instance.post('/calls/log', body: {
         'phoneNumber': number,
-        'direction': 'outbound',
-        'status': answered ? 'completed' : 'no_answer',
+        'direction': inbound ? 'inbound' : 'outbound',
+        'status': answered ? 'completed' : (inbound ? 'missed' : 'no_answer'),
         'durationSeconds': duration,
         'startedAt': _telnyxDialedAt?.toUtc().toIso8601String(),
         'endedAt': DateTime.now().toUtc().toIso8601String(),

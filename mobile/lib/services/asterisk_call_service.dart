@@ -5,6 +5,9 @@ enum AsteriskCallUiState { registering, connecting, ringing, active, ended, erro
 
 typedef AsteriskStateCallback = void Function(AsteriskCallUiState state, String? detail);
 
+/// An inbound call waiting to be answered (a candidate calling the SIM back).
+typedef AsteriskIncomingCallback = void Function(Call call, String fromNumber);
+
 /// Built-in softphone for UAE users. Registers the user's own SIP account
 /// (from GET /calls/asterisk/config) against the self-hosted Asterisk over an
 /// encrypted WebSocket — plain SIP is blocked by UAE ISPs — and places calls
@@ -15,10 +18,47 @@ class AsteriskCallService implements SipUaHelperListener {
 
   Call? _call;
   AsteriskStateCallback? _onState;
+  AsteriskIncomingCallback? _onIncoming;
   String? _pendingDestination;
   bool _started = false;
 
   bool get registered => _helper.registered;
+
+  /// Register without dialing so the user can receive return calls. Safe to
+  /// call repeatedly — registration is reused for the app session.
+  Future<void> connect({
+    required String wssUrl,
+    required String sipDomain,
+    required String sipUsername,
+    required String sipPassword,
+    required String displayName,
+    required AsteriskStateCallback onState,
+    required AsteriskIncomingCallback onIncoming,
+  }) async {
+    _onState = onState;
+    _onIncoming = onIncoming;
+    if (_started || _helper.registered) return;
+    await _start(
+      wssUrl: wssUrl,
+      sipDomain: sipDomain,
+      sipUsername: sipUsername,
+      sipPassword: sipPassword,
+      displayName: displayName,
+    );
+  }
+
+  /// Answer a ringing inbound call.
+  void answer(Call call) {
+    _call = call;
+    call.answer(_helper.buildCallOptions(true));
+  }
+
+  /// Reject a ringing inbound call so it keeps ringing the rest of the team.
+  void decline(Call call) {
+    try {
+      call.hangup({'status_code': 486});
+    } catch (_) {}
+  }
 
   Future<void> startCall({
     required String wssUrl,
@@ -28,8 +68,10 @@ class AsteriskCallService implements SipUaHelperListener {
     required String displayName,
     required String destination,
     required AsteriskStateCallback onState,
+    AsteriskIncomingCallback? onIncoming,
   }) async {
     _onState = onState;
+    if (onIncoming != null) _onIncoming = onIncoming;
     _pendingDestination = destination;
 
     if (_helper.registered) {
@@ -40,6 +82,22 @@ class AsteriskCallService implements SipUaHelperListener {
     onState(AsteriskCallUiState.registering, null);
     if (_started) return; // registration in flight; _dialPending fires on success
 
+    await _start(
+      wssUrl: wssUrl,
+      sipDomain: sipDomain,
+      sipUsername: sipUsername,
+      sipPassword: sipPassword,
+      displayName: displayName,
+    );
+  }
+
+  Future<void> _start({
+    required String wssUrl,
+    required String sipDomain,
+    required String sipUsername,
+    required String sipPassword,
+    required String displayName,
+  }) async {
     final settings = UaSettings()
       ..webSocketUrl = wssUrl
       ..transportType = TransportType.WS
@@ -100,6 +158,12 @@ class AsteriskCallService implements SipUaHelperListener {
 
   @override
   void callStateChanged(Call call, CallState state) {
+    // Inbound call arriving (candidate returning a call to the shared SIM):
+    // surface it to the UI instead of treating it as our own outbound call.
+    if (state.state == CallStateEnum.CALL_INITIATION && call.direction == Direction.incoming) {
+      _onIncoming?.call(call, call.remote_identity ?? 'Unknown');
+      return;
+    }
     _call = call;
     switch (state.state) {
       case CallStateEnum.CONNECTING:
