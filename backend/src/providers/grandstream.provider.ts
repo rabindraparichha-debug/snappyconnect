@@ -15,10 +15,10 @@ import {
 /**
  * Grandstream UCM PBX + Dinstar gateway (UAE).
  *
- * A single shared Wave extension (configured in Settings) is used by all
- * UAE users. The PBX rings that extension, then dials out through the
- * Dinstar trunk. Only one call at a time is possible on the shared
- * extension; SnappyConnect tracks which user initiated each call.
+ * Each UAE user may have their own Wave extension (providerConfig.extension,
+ * e.g. 1021/1022/1023); otherwise the shared extension from Settings is
+ * used. The PBX rings that extension, then dials out through the Dinstar
+ * trunk. SnappyConnect tracks which user initiated each call.
  */
 @Injectable()
 export class GrandstreamProvider implements CallingProviderStrategy {
@@ -38,10 +38,11 @@ export class GrandstreamProvider implements CallingProviderStrategy {
         'Grandstream PBX is not configured. Ask an admin to add PBX details in Settings.',
       );
     }
-    const extension: string | undefined = cfg.extension;
+    const extension: string | undefined =
+      input.user.providerConfig?.extension || cfg.extension;
     if (!extension) {
       throw new BadRequestException(
-        'No shared Wave extension configured. Ask an admin to set it in Settings → Grandstream PBX.',
+        'No Wave extension configured. Ask an admin to set one on your user or in Settings → Grandstream PBX.',
       );
     }
 
@@ -99,7 +100,7 @@ export class GrandstreamProvider implements CallingProviderStrategy {
       throw new BadRequestException('PBX login failed — check the API password in Settings.');
     }
 
-    const outbound = (cfg.callerPrefix ?? '') + phoneNumber;
+    const outbound = (cfg.callerPrefix ?? '') + this.normalizeUaeNumber(phoneNumber);
     const dialResp = await this.ucmRequest(host, port, {
       request: {
         action: 'dialOutbound',
@@ -116,6 +117,21 @@ export class GrandstreamProvider implements CallingProviderStrategy {
         `PBX rejected the call (status ${dialResp.status}). Verify the extension and outbound route.`,
       );
     }
+  }
+
+  /**
+   * The PBX route chain (CloudUCM `_X.` -> on-prem strip 1 / prepend +971 ->
+   * outbound `_+971x.`) only produces a valid number when the app sends local
+   * UAE format (0XXXXXXXXX). Recruiters type numbers in every format, so
+   * convert +971 / 971 / 00971 prefixes to a leading 0 before dialing.
+   * Numbers for other countries (00-prefixed) pass through unchanged.
+   */
+  private normalizeUaeNumber(phoneNumber: string): string {
+    const n = phoneNumber.replace(/[\s\-().]/g, '');
+    if (n.startsWith('00971')) return '0' + n.slice(5);
+    if (n.startsWith('+971')) return '0' + n.slice(4);
+    if (n.startsWith('971') && n.length >= 11) return '0' + n.slice(3);
+    return n;
   }
 
   /** UCM APIs use self-signed certificates, so TLS verification is relaxed for this call only. */

@@ -15,6 +15,7 @@ interface UserForm {
   role: 'admin' | 'user';
   provider: '' | CallingProvider;
   telnyxCredentialId: string;
+  grandstreamExtension: string;
 }
 
 const EMPTY_FORM: UserForm = {
@@ -26,6 +27,7 @@ const EMPTY_FORM: UserForm = {
   role: 'user',
   provider: '',
   telnyxCredentialId: '',
+  grandstreamExtension: '',
 };
 
 export default function UsersPage() {
@@ -83,6 +85,7 @@ export default function UsersPage() {
       role: user.role,
       provider: user.provider ?? '',
       telnyxCredentialId: user.providerConfig?.telnyxCredentialId ?? '',
+      grandstreamExtension: user.providerConfig?.extension ?? '',
     });
     setFormError(null);
     setModalOpen(true);
@@ -96,6 +99,9 @@ export default function UsersPage() {
     const providerConfig: Record<string, string> = {};
     if (form.provider === 'telnyx' && form.telnyxCredentialId) {
       providerConfig.telnyxCredentialId = form.telnyxCredentialId;
+    }
+    if (form.provider === 'grandstream' && form.grandstreamExtension) {
+      providerConfig.extension = form.grandstreamExtension.trim();
     }
 
     const body: Record<string, unknown> = {
@@ -327,6 +333,17 @@ export default function UsersPage() {
                 placeholder="Uses global credential if empty"
                 value={form.telnyxCredentialId}
                 onChange={(e) => setForm({ ...form, telnyxCredentialId: e.target.value })}
+              />
+            </div>
+          )}
+
+          {form.provider === 'grandstream' && (
+            <div>
+              <Label>Wave Extension (optional)</Label>
+              <Input
+                placeholder="e.g. 1021 — uses shared extension if empty"
+                value={form.grandstreamExtension}
+                onChange={(e) => setForm({ ...form, grandstreamExtension: e.target.value })}
               />
             </div>
           )}
