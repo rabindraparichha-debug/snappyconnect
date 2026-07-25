@@ -41,6 +41,42 @@ export class SmsService {
     return this.smsRepo.save(log);
   }
 
+  /**
+   * Telnyx message webhook: store inbound SMS and reconcile outbound delivery
+   * status. Non-message events are ignored (call events are handled elsewhere).
+   */
+  async handleTelnyxWebhook(event: any): Promise<void> {
+    const eventType: string | undefined = event?.data?.event_type;
+    const payload = event?.data?.payload;
+    if (!eventType?.startsWith('message.') || !payload) return;
+
+    if (eventType === 'message.received') {
+      await this.smsRepo.save(
+        this.smsRepo.create({
+          userId: null,
+          phoneNumber: payload.from?.phone_number ?? 'unknown',
+          direction: SmsDirection.INBOUND,
+          body: payload.text ?? '',
+          status: SmsStatus.RECEIVED,
+          externalId: payload.id ?? null,
+        }),
+      );
+      return;
+    }
+
+    // Outbound lifecycle (message.sent / message.finalized): update by provider id.
+    if (!payload.id) return;
+    const log = await this.smsRepo.findOne({ where: { externalId: payload.id } });
+    if (!log || log.direction !== SmsDirection.OUTBOUND) return;
+    const to = Array.isArray(payload.to) ? payload.to[0] : payload.to;
+    const status: string | undefined = to?.status ?? payload.status;
+    if (status === 'delivered') log.status = SmsStatus.DELIVERED;
+    else if (['sending_failed', 'delivery_failed', 'failed'].includes(status ?? '')) {
+      log.status = SmsStatus.FAILED;
+    }
+    await this.smsRepo.save(log);
+  }
+
   async findAll(user: User, page = 1, limit = 20) {
     const qb = this.smsRepo
       .createQueryBuilder('sms')
