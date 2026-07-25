@@ -16,6 +16,8 @@ interface UserForm {
   provider: '' | CallingProvider;
   telnyxCredentialId: string;
   grandstreamExtension: string;
+  sipUsername: string;
+  sipPassword: string;
 }
 
 const EMPTY_FORM: UserForm = {
@@ -28,6 +30,8 @@ const EMPTY_FORM: UserForm = {
   provider: '',
   telnyxCredentialId: '',
   grandstreamExtension: '',
+  sipUsername: '',
+  sipPassword: '',
 };
 
 export default function UsersPage() {
@@ -86,6 +90,8 @@ export default function UsersPage() {
       provider: user.provider ?? '',
       telnyxCredentialId: user.providerConfig?.telnyxCredentialId ?? '',
       grandstreamExtension: user.providerConfig?.extension ?? '',
+      sipUsername: user.providerConfig?.sipUsername ?? '',
+      sipPassword: user.providerConfig?.sipPassword ?? '',
     });
     setFormError(null);
     setModalOpen(true);
@@ -102,6 +108,10 @@ export default function UsersPage() {
     }
     if (form.provider === 'grandstream' && form.grandstreamExtension) {
       providerConfig.extension = form.grandstreamExtension.trim();
+    }
+    if (form.provider === 'asterisk') {
+      if (form.sipUsername) providerConfig.sipUsername = form.sipUsername.trim();
+      if (form.sipPassword) providerConfig.sipPassword = form.sipPassword.trim();
     }
 
     const body: Record<string, unknown> = {
@@ -183,6 +193,7 @@ export default function UsersPage() {
             <option value="telnyx">Telnyx (USA)</option>
             <option value="grandstream">Grandstream PBX (UAE)</option>
             <option value="native_dialer">Native Dialer (India)</option>
+            <option value="asterisk">In-App SIP (UAE)</option>
           </Select>
         </div>
       </Card>
@@ -324,6 +335,7 @@ export default function UsersPage() {
               <option value="telnyx">Telnyx (USA)</option>
               <option value="grandstream">Grandstream PBX (UAE)</option>
               <option value="native_dialer">Native Dialer (India)</option>
+              <option value="asterisk">In-App SIP (UAE)</option>
             </Select>
           </div>
           {form.provider === 'telnyx' && (
@@ -346,6 +358,28 @@ export default function UsersPage() {
                 onChange={(e) => setForm({ ...form, grandstreamExtension: e.target.value })}
               />
             </div>
+          )}
+
+          {form.provider === 'asterisk' && (
+            <>
+              <div>
+                <Label>SIP Username</Label>
+                <Input
+                  placeholder="e.g. 2001"
+                  value={form.sipUsername}
+                  onChange={(e) => setForm({ ...form, sipUsername: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>SIP Password</Label>
+                <Input
+                  type="password"
+                  placeholder="From the Asterisk server accounts"
+                  value={form.sipPassword}
+                  onChange={(e) => setForm({ ...form, sipPassword: e.target.value })}
+                />
+              </div>
+            </>
           )}
 
           {formError && (

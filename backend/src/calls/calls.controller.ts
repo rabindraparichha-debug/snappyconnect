@@ -14,6 +14,7 @@ import {
 import { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CallSource } from '../common/enums';
+import { AsteriskProvider } from '../providers/asterisk.provider';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
 import { CallsService } from './calls.service';
@@ -28,6 +29,7 @@ export class CallsController {
   constructor(
     private readonly callsService: CallsService,
     private readonly telnyxProvider: TelnyxProvider,
+    private readonly asteriskProvider: AsteriskProvider,
   ) {}
 
   // ----- Initiation -----
@@ -47,6 +49,12 @@ export class CallsController {
   @Post('telnyx/token')
   telnyxToken(@CurrentUser() user: User) {
     return this.telnyxProvider.createWebRtcToken(user);
+  }
+
+  /** SIP connection details for the mobile app's built-in Asterisk softphone (UAE). */
+  @Get('asterisk/config')
+  asteriskConfig(@CurrentUser() user: User) {
+    return this.asteriskProvider.getClientConfig(user);
   }
 
   // ----- Client-reported call logs -----

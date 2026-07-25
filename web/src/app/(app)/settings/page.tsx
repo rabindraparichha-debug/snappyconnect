@@ -54,6 +54,25 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
     ],
   },
   {
+    key: 'asterisk',
+    title: 'Asterisk SIP Server (UAE — in-app dialer)',
+    description:
+      'Self-hosted Asterisk on the VPS. The mobile app registers each user’s own SIP account over an encrypted WebSocket and dials in-app.',
+    fields: [
+      {
+        key: 'wssUrl',
+        label: 'WSS URL',
+        placeholder: 'wss://145.223.18.237:8089/ws',
+        hint: 'Asterisk WebSocket (TLS) endpoint the mobile app connects to.',
+      },
+      {
+        key: 'domain',
+        label: 'SIP Domain (optional)',
+        placeholder: 'Defaults to the WSS host',
+      },
+    ],
+  },
+  {
     key: 'dinstar',
     title: 'Dinstar Gateway (UAE)',
     description:

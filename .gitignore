@@ -25,3 +25,4 @@ build/
 # Logs
 *.log
 deploy/.secrets.env
+deploy/.sip-accounts

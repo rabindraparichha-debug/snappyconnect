@@ -38,6 +38,7 @@ class User {
         'telnyx' => 'Telnyx (USA)',
         'grandstream' => 'Grandstream PBX (UAE)',
         'native_dialer' => 'Native Dialer (India)',
+        'asterisk' => 'In-App SIP (UAE)',
         _ => 'Unassigned',
       };
 }

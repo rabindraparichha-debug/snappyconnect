@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { decryptString, encryptString } from '../common/crypto.util';
 import { Setting } from './setting.entity';
 
-export const PROVIDER_SETTING_KEYS = ['telnyx', 'grandstream', 'dinstar'] as const;
+export const PROVIDER_SETTING_KEYS = ['telnyx', 'grandstream', 'dinstar', 'asterisk'] as const;
 export type ProviderSettingKey = (typeof PROVIDER_SETTING_KEYS)[number];
 
 /** Fields that are masked when settings are read back through the API. */

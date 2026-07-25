@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CallingProvider } from '../common/enums';
+import { AsteriskProvider } from './asterisk.provider';
 import { GrandstreamProvider } from './grandstream.provider';
 import { NativeDialerProvider } from './native-dialer.provider';
 import { CallingProviderStrategy } from './provider.interface';
@@ -17,11 +18,13 @@ export class ProvidersService {
     telnyx: TelnyxProvider,
     grandstream: GrandstreamProvider,
     nativeDialer: NativeDialerProvider,
+    asterisk: AsteriskProvider,
   ) {
     this.strategies = new Map<CallingProvider, CallingProviderStrategy>([
       [telnyx.key, telnyx],
       [grandstream.key, grandstream],
       [nativeDialer.key, nativeDialer],
+      [asterisk.key, asterisk],
     ]);
   }
 

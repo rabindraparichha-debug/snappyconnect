@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'user';
-export type CallingProvider = 'telnyx' | 'grandstream' | 'native_dialer';
+export type CallingProvider = 'telnyx' | 'grandstream' | 'native_dialer' | 'asterisk';
 export type UserStatus = 'active' | 'inactive';
 export type CallDirection = 'inbound' | 'outbound';
 export type CallStatus =
@@ -73,4 +73,5 @@ export const PROVIDER_LABELS: Record<CallingProvider, string> = {
   telnyx: 'Telnyx (USA)',
   grandstream: 'Grandstream PBX (UAE)',
   native_dialer: 'Native Dialer (India)',
+  asterisk: 'In-App SIP (UAE)',
 };

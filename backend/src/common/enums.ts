@@ -7,6 +7,7 @@ export enum CallingProvider {
   TELNYX = 'telnyx',
   GRANDSTREAM = 'grandstream',
   NATIVE_DIALER = 'native_dialer',
+  ASTERISK = 'asterisk',
 }
 
 export enum UserStatus {

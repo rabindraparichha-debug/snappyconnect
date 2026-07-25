@@ -17,6 +17,7 @@ dependencies:
   permission_handler: ^12.0.0
   intl: ^0.20.0
   telnyx_webrtc: ^4.4.0
+  sip_ua: ^1.0.0
 
 dev_dependencies:
   flutter_test:

@@ -276,7 +276,9 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
             ? 'Telnyx (browser)'
             : user.provider === 'grandstream'
               ? 'Grandstream PBX (your extension will ring)'
-              : 'your mobile phone (native dialer)'}
+              : user.provider === 'asterisk'
+                ? 'the SnappyConnect mobile app (in-app SIP dialer)'
+                : 'your mobile phone (native dialer)'}
         </p>
       )}
       {!user?.provider && (
