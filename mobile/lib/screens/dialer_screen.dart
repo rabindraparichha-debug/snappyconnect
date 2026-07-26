@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../api/api_client.dart';
 import '../models.dart';
+import '../region.dart';
 import '../services/asterisk_call_service.dart';
 import '../services/native_dialer_service.dart';
 import '../services/telnyx_call_service.dart';
@@ -39,6 +40,11 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   // Set while an inbound (return) call is in progress, so it is logged as such.
   String? _inboundNumber;
 
+  /// Region the next call goes out on. Auto-follows the typed number's dial
+  /// code, but the user can override it with the chips.
+  String? _region;
+  bool _regionPinned = false;
+
   // Polling for click-to-call requests coming from the web / extension.
   Timer? _pollTimer;
   final Set<String> _seenRequests = {};
@@ -47,12 +53,25 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (_user?.provider == 'native_dialer') {
+    if ((_user?.allowedRegions ?? const []).contains(Regions.india)) {
       _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollPendingRequests());
     }
-    if (_user?.provider == 'asterisk') {
+    final allowed = _user?.allowedRegions ?? const [];
+    _region = allowed.isNotEmpty ? allowed.first : null;
+    if (allowed.contains(Regions.uae)) {
       // Register right away so return calls from candidates ring this device.
       _connectAsterisk();
+    }
+    _numberController.addListener(_autoSelectRegion);
+  }
+
+  /// Follow the typed number's country code unless the user picked a region.
+  void _autoSelectRegion() {
+    if (_regionPinned) return;
+    final guess = Regions.fromNumber(_numberController.text);
+    final allowed = _user?.allowedRegions ?? const [];
+    if (guess != null && guess != _region && allowed.contains(guess)) {
+      setState(() => _region = guess);
     }
   }
 
@@ -215,19 +234,21 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     });
 
     try {
-      switch (_user?.provider) {
-        case 'native_dialer':
+      switch (_region) {
+        case Regions.india:
           await _callViaNativeDialer(number);
-        case 'telnyx':
+        case Regions.usa:
           await _callViaTelnyx(number);
-        case 'asterisk':
-          await _callViaAsterisk(number);
-        case 'grandstream':
-          final result = await ApiClient.instance
-              .post('/calls/initiate', body: {'phoneNumber': number, 'source': 'mobile'});
-          setState(() => _status = (result as Map<String, dynamic>)['message'] as String);
+        case Regions.uae:
+          if (_user?.provider == 'grandstream') {
+            final result = await ApiClient.instance.post('/calls/initiate',
+                body: {'phoneNumber': number, 'source': 'mobile', 'region': _region});
+            setState(() => _status = (result as Map<String, dynamic>)['message'] as String);
+          } else {
+            await _callViaAsterisk(number);
+          }
         default:
-          setState(() => _status = 'No calling provider assigned — ask your administrator.');
+          setState(() => _status = 'No calling region assigned — ask your administrator.');
       }
     } catch (err) {
       setState(() => _status = err.toString());
@@ -238,8 +259,8 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   Future<void> _callViaNativeDialer(String number) async {
     // Register the request so the call appears in SnappyConnect history.
-    final result = await ApiClient.instance
-        .post('/calls/initiate', body: {'phoneNumber': number, 'source': 'mobile'});
+    final result = await ApiClient.instance.post('/calls/initiate',
+        body: {'phoneNumber': number, 'source': 'mobile', 'region': Regions.india});
     final requestId = (result as Map<String, dynamic>)['requestId'] as String;
     _seenRequests.add(requestId);
     await ApiClient.instance.post('/calls/requests/$requestId/ack');
@@ -491,6 +512,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final providerLabel = _user?.providerLabel ?? 'Unassigned';
+    final regions = _user?.allowedRegions ?? const <String>[];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Dialer')),
@@ -499,10 +521,37 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              Chip(
-                avatar: const Icon(Icons.sim_card_outlined, size: 18),
-                label: Text(providerLabel),
-              ),
+              if (regions.length > 1)
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final region in regions)
+                      ChoiceChip(
+                        label: Text(Regions.label(region)),
+                        selected: _region == region,
+                        onSelected: _inTelnyxCall
+                            ? null
+                            : (_) => setState(() {
+                                  _region = region;
+                                  _regionPinned = true;
+                                }),
+                      ),
+                  ],
+                )
+              else
+                Chip(
+                  avatar: const Icon(Icons.sim_card_outlined, size: 18),
+                  label: Text(regions.isEmpty ? providerLabel : Regions.label(regions.first)),
+                ),
+              if (_region != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    Regions.hint(_region!),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  ),
+                ),
               const SizedBox(height: 12),
               TextField(
                 controller: _numberController,
@@ -544,9 +593,8 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
                 child: _inTelnyxCall
                     ? FilledButton.icon(
                         style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
-                        onPressed: () => _user?.provider == 'asterisk'
-                            ? _asterisk.hangup()
-                            : _telnyx.hangup(),
+                        onPressed: () =>
+                            _region == Regions.uae ? _asterisk.hangup() : _telnyx.hangup(),
                         icon: const Icon(Icons.call_end),
                         label: const Text('Hang up'),
                       )

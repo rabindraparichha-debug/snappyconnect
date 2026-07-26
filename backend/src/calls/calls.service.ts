@@ -12,8 +12,11 @@ import {
   CallRequestStatus,
   CallSource,
   CallStatus,
+  Region,
+  REGION_PROVIDER,
   Role,
 } from '../common/enums';
+import { guessRegion } from '../common/region.util';
 import { ProvidersService } from '../providers/providers.service';
 import { InitiateCallResult } from '../providers/provider.interface';
 import { User } from '../users/user.entity';
@@ -42,9 +45,47 @@ export class CallsService {
     user: User,
     phoneNumber: string,
     source: CallSource = CallSource.WEB,
+    region?: Region,
   ): Promise<InitiateCallResult> {
-    const strategy = this.providersService.getStrategy(user.provider);
-    return strategy.initiateCall({ user, phoneNumber: phoneNumber.trim(), source });
+    const number = phoneNumber.trim();
+    const provider = this.resolveProvider(user, number, region);
+    const strategy = this.providersService.getStrategy(provider);
+    return strategy.initiateCall({ user, phoneNumber: number, source });
+  }
+
+  /**
+   * Pick the provider for a call: the explicitly requested region wins, then
+   * the region guessed from the number's dial code, then the user's single
+   * legacy provider. Users may only call regions they were granted.
+   */
+  private resolveProvider(user: User, phoneNumber: string, region?: Region): CallingProvider | null {
+    const allowed = this.allowedRegions(user);
+
+    if (region) {
+      if (!allowed.includes(region)) {
+        throw new ForbiddenException(
+          `You do not have access to ${region.toUpperCase()} calling. Ask an admin to enable it.`,
+        );
+      }
+      return REGION_PROVIDER[region];
+    }
+
+    const guessed = guessRegion(phoneNumber);
+    if (guessed && allowed.includes(guessed)) return REGION_PROVIDER[guessed];
+
+    // Single-region users keep working without ever passing a region.
+    if (allowed.length === 1) return REGION_PROVIDER[allowed[0]];
+    return user.provider;
+  }
+
+  /** Regions a user may call in, falling back to the one implied by `provider`. */
+  private allowedRegions(user: User): Region[] {
+    const regions = (user.regions ?? []).filter((r): r is Region =>
+      Object.values(Region).includes(r as Region),
+    );
+    if (regions.length) return regions;
+    const implied = Object.entries(REGION_PROVIDER).find(([, p]) => p === user.provider);
+    return implied ? [implied[0] as Region] : [];
   }
 
   // ---------- Client-reported logs (web dialer / mobile Telnyx) ----------

@@ -8,6 +8,7 @@ class User {
     this.country,
     this.provider,
     this.providerConfig = const {},
+    this.regions = const [],
     required this.status,
   });
 
@@ -19,6 +20,9 @@ class User {
   final String? country;
   final String? provider; // telnyx | grandstream | native_dialer
   final Map<String, dynamic> providerConfig;
+
+  /// Regions this user may call from: india | usa | uae.
+  final List<String> regions;
   final String status;
 
   factory User.fromJson(Map<String, dynamic> json) => User(
@@ -31,8 +35,22 @@ class User {
         provider: json['provider'] as String?,
         providerConfig:
             (json['providerConfig'] as Map<String, dynamic>?) ?? const {},
+        regions: ((json['regions'] as List<dynamic>?) ?? const [])
+            .map((r) => r.toString())
+            .toList(),
         status: json['status'] as String? ?? 'active',
       );
+
+  /// Regions the user can work in — falls back to the one implied by provider.
+  List<String> get allowedRegions {
+    if (regions.isNotEmpty) return regions;
+    return switch (provider) {
+      'telnyx' => const ['usa'],
+      'native_dialer' => const ['india'],
+      'asterisk' || 'grandstream' => const ['uae'],
+      _ => const [],
+    };
+  }
 
   String get providerLabel => switch (provider) {
         'telnyx' => 'Telnyx (USA)',

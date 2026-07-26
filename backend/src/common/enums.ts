@@ -10,6 +10,27 @@ export enum CallingProvider {
   ASTERISK = 'asterisk',
 }
 
+/** Calling regions a user can be granted access to. */
+export enum Region {
+  INDIA = 'india',
+  USA = 'usa',
+  UAE = 'uae',
+}
+
+/** Which provider serves each region. */
+export const REGION_PROVIDER: Record<Region, CallingProvider> = {
+  [Region.INDIA]: CallingProvider.NATIVE_DIALER,
+  [Region.USA]: CallingProvider.TELNYX,
+  [Region.UAE]: CallingProvider.ASTERISK,
+};
+
+/** International dial prefixes used to guess a number's region. */
+export const REGION_DIAL_CODES: Record<Region, string[]> = {
+  [Region.INDIA]: ['+91', '0091', '91'],
+  [Region.USA]: ['+1', '001'],
+  [Region.UAE]: ['+971', '00971', '971'],
+};
+
 export enum UserStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',

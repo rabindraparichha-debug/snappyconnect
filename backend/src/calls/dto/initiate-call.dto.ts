@@ -1,5 +1,5 @@
 import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
-import { CallSource } from '../../common/enums';
+import { CallSource, Region } from '../../common/enums';
 
 export class InitiateCallDto {
   @IsString()
@@ -10,4 +10,9 @@ export class InitiateCallDto {
   @IsOptional()
   @IsEnum(CallSource)
   source?: CallSource;
+
+  /** Which regional line to call from. Defaults to the number's dial code. */
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
 }

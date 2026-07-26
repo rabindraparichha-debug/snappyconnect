@@ -5,7 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { CallingProvider, Role, UserStatus } from '../common/enums';
+import { CallingProvider, Region, Role, UserStatus } from '../common/enums';
 
 @Entity('users')
 export class User {
@@ -32,6 +32,14 @@ export class User {
 
   @Column({ type: 'enum', enum: CallingProvider, nullable: true })
   provider: CallingProvider | null;
+
+  /**
+   * Regions this user may place calls in (india / usa / uae). Each region maps
+   * to a provider, so one user can work several regions from the same app.
+   * Empty means "only the single legacy `provider` above".
+   */
+  @Column({ type: 'simple-array', default: '' })
+  regions: string[];
 
   /**
    * Provider-specific per-user config, e.g.

@@ -2,8 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
-import type { CallingProvider, Paginated, User } from '@/lib/types';
-import { PROVIDER_LABELS } from '@/lib/types';
+import type { CallingProvider, Paginated, Region, User } from '@/lib/types';
+import { PROVIDER_LABELS, REGION_HINTS, REGION_LABELS, REGIONS } from '@/lib/types';
 import { Badge, Button, Card, EmptyState, Input, Label, Modal, Select, Spinner } from '@/components/ui';
 
 interface UserForm {
@@ -18,6 +18,7 @@ interface UserForm {
   grandstreamExtension: string;
   sipUsername: string;
   sipPassword: string;
+  regions: Region[];
 }
 
 const EMPTY_FORM: UserForm = {
@@ -32,6 +33,7 @@ const EMPTY_FORM: UserForm = {
   grandstreamExtension: '',
   sipUsername: '',
   sipPassword: '',
+  regions: [],
 };
 
 export default function UsersPage() {
@@ -92,6 +94,7 @@ export default function UsersPage() {
       grandstreamExtension: user.providerConfig?.extension ?? '',
       sipUsername: user.providerConfig?.sipUsername ?? '',
       sipPassword: user.providerConfig?.sipPassword ?? '',
+      regions: user.regions ?? [],
     });
     setFormError(null);
     setModalOpen(true);
@@ -121,6 +124,7 @@ export default function UsersPage() {
       country: form.country || undefined,
       role: form.role,
       provider: form.provider || undefined,
+      regions: form.regions,
       providerConfig: Object.keys(providerConfig).length ? providerConfig : undefined,
     };
     if (form.password) body.password = form.password;
@@ -230,7 +234,24 @@ export default function UsersPage() {
                     </Td>
                     <Td>{user.mobileNumber ?? '—'}</Td>
                     <Td>{user.country ?? '—'}</Td>
-                    <Td>{user.provider ? PROVIDER_LABELS[user.provider] : <span className="text-slate-400">Unassigned</span>}</Td>
+                    <Td>
+                      {user.regions?.length ? (
+                        <span className="flex flex-wrap gap-1">
+                          {user.regions.map((r) => (
+                            <span
+                              key={r}
+                              className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700"
+                            >
+                              {REGION_LABELS[r]}
+                            </span>
+                          ))}
+                        </span>
+                      ) : user.provider ? (
+                        PROVIDER_LABELS[user.provider]
+                      ) : (
+                        <span className="text-slate-400">Unassigned</span>
+                      )}
+                    </Td>
                     <Td className="capitalize">{user.role}</Td>
                     <Td>
                       <Badge value={user.status} />
@@ -338,7 +359,7 @@ export default function UsersPage() {
               <option value="asterisk">In-App SIP (UAE)</option>
             </Select>
           </div>
-          {form.provider === 'telnyx' && (
+          {(form.provider === 'telnyx' || form.regions.includes('usa')) && (
             <div>
               <Label>Telnyx Credential ID (optional)</Label>
               <Input
@@ -349,7 +370,50 @@ export default function UsersPage() {
             </div>
           )}
 
-          {form.provider === 'grandstream' && (
+          <div className="col-span-full">
+            <Label>Calling regions</Label>
+            <p className="mb-2 text-xs text-slate-500">
+              Which regions this user can call from in the app. Leave empty to use only the
+              provider above.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {REGIONS.map((region) => {
+                const checked = form.regions.includes(region);
+                return (
+                  <label
+                    key={region}
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 transition-colors ${
+                      checked
+                        ? 'border-indigo-300 bg-indigo-50'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={checked}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          regions: e.target.checked
+                            ? [...form.regions, region]
+                            : form.regions.filter((r) => r !== region),
+                        })
+                      }
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-slate-800">
+                        {REGION_LABELS[region]}
+                      </span>
+                      <span className="block text-xs text-slate-500">{REGION_HINTS[region]}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {(form.provider === 'grandstream' || form.regions.includes('uae')) && (
             <div>
               <Label>Wave Extension (optional)</Label>
               <Input
@@ -360,7 +424,7 @@ export default function UsersPage() {
             </div>
           )}
 
-          {form.provider === 'asterisk' && (
+          {(form.provider === 'asterisk' || form.regions.includes('uae')) && (
             <>
               <div>
                 <Label>SIP Username</Label>

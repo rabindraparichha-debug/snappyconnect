@@ -36,13 +36,23 @@ export class CallsController {
 
   @Post('initiate')
   initiate(@CurrentUser() user: User, @Body() dto: InitiateCallDto) {
-    return this.callsService.initiate(user, dto.phoneNumber, dto.source ?? CallSource.WEB);
+    return this.callsService.initiate(
+      user,
+      dto.phoneNumber,
+      dto.source ?? CallSource.WEB,
+      dto.region,
+    );
   }
 
   /** Same as initiate, used by the Chrome extension and external apps. */
   @Post('click-to-call')
   clickToCall(@CurrentUser() user: User, @Body() dto: InitiateCallDto) {
-    return this.callsService.initiate(user, dto.phoneNumber, dto.source ?? CallSource.EXTENSION);
+    return this.callsService.initiate(
+      user,
+      dto.phoneNumber,
+      dto.source ?? CallSource.EXTENSION,
+      dto.region,
+    );
   }
 
   /** Short-lived Telnyx WebRTC token for the web/mobile dialer. */

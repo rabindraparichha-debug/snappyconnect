@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsEmail,
   IsEnum,
   IsNotEmpty,
@@ -7,7 +8,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
-import { CallingProvider, Role, UserStatus } from '../../common/enums';
+import { CallingProvider, Region, Role, UserStatus } from '../../common/enums';
 
 export class CreateUserDto {
   @IsString()
@@ -36,6 +37,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(CallingProvider)
   provider?: CallingProvider;
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(Region, { each: true })
+  regions?: Region[];
 
   @IsOptional()
   @IsObject()
