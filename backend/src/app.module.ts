@@ -17,6 +17,9 @@ import { SeedModule } from './seed/seed.module';
 import { SettingsModule } from './settings/settings.module';
 import { SmsModule } from './sms/sms.module';
 import { ActivityModule } from './activity/activity.module';
+import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
+import { ScriptsModule } from './scripts/scripts.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -46,6 +49,9 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     NotificationsModule,
     ActivityModule,
+    ScheduledCallsModule,
+    ScriptsModule,
+    WebhooksModule,
     SeedModule,
   ],
   controllers: [AppController],

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActivityModule } from '../activity/activity.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { SmsModule } from '../sms/sms.module';
@@ -19,6 +20,7 @@ import { WebhooksController } from './webhooks.controller';
     SmsModule,
     NotificationsModule,
     ActivityModule,
+    WebhooksModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
   providers: [CallsService],

@@ -24,6 +24,8 @@ import { NotificationType } from '../notifications/notification.entity';
 import { ProvidersService } from '../providers/providers.service';
 import { InitiateCallResult } from '../providers/provider.interface';
 import { User } from '../users/user.entity';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '../webhooks/webhook.entity';
 import { CallLog } from './call-log.entity';
 import { CallRequest } from './call-request.entity';
 import { CompleteRequestDto } from './dto/complete-request.dto';
@@ -43,6 +45,7 @@ export class CallsService {
     private readonly providersService: ProvidersService,
     private readonly notificationsService: NotificationsService,
     private readonly activityService: ActivityService,
+    private readonly webhooksService: WebhooksService,
   ) {}
 
   // ---------- Initiation ----------
@@ -127,6 +130,18 @@ export class CallsService {
     const actType = dto.direction === CallDirection.INBOUND ? ActivityType.CALL_RECEIVED : ActivityType.CALL_MADE;
     this.activityService.log(actType, `${dto.direction} call to ${dto.phoneNumber}`, user.id, log.id).catch(() => {});
 
+    this.webhooksService.dispatch(WebhookEvent.CALL_COMPLETED, {
+      callId: log.id,
+      phoneNumber: log.phoneNumber,
+      contactName: log.contactName,
+      direction: log.direction,
+      status: log.status,
+      durationSeconds: log.durationSeconds,
+      region: log.region,
+      startedAt: log.startedAt,
+      user: { id: user.id, name: user.name, email: user.email },
+    });
+
     if (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER) {
       this.notificationsService.create(
         user.id,
@@ -166,6 +181,14 @@ export class CallsService {
     }
     if (dto.disposition !== undefined) {
       this.activityService.log(ActivityType.DISPOSITION_SET, `Disposition "${dto.disposition}" on ${log.phoneNumber}`, user.id, log.id).catch(() => {});
+      this.webhooksService.dispatch(WebhookEvent.DISPOSITION_SET, {
+        callId: log.id,
+        phoneNumber: log.phoneNumber,
+        contactName: log.contactName,
+        disposition: dto.disposition,
+        notes: log.notes,
+        user: { id: user.id, name: user.name, email: user.email },
+      });
     }
 
     return this.callLogsRepo.save(log);

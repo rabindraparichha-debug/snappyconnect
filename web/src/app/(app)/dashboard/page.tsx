@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [scheduled, setScheduled] = useState<ScheduledCallItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +37,7 @@ export default function DashboardPage() {
       api<RecruiterStats>('/analytics/recruiter'),
       api<TrendPoint[]>('/analytics/recruiter/trend', { query: { granularity: 'day' } }),
       api<FollowUp[]>('/calls/follow-ups', { query: { limit: 5 } }),
+      api<ScheduledCallItem[]>('/scheduled-calls/upcoming', { query: { limit: 5 } }),
     ];
     if (isAdmin) {
       fetches.push(api<LeaderboardEntry[]>('/analytics/team/leaderboard', { query: { limit: 5 } }));
@@ -43,12 +45,13 @@ export default function DashboardPage() {
     }
 
     Promise.all(fetches)
-      .then(([s, c, r, t, fu, lb, act]) => {
+      .then(([s, c, r, t, fu, sched, lb, act]) => {
         setStats(s);
         setRecent(c.items);
         setRecruiter(r);
         setTrend(t);
         setFollowUps(fu);
+        setScheduled(sched);
         if (lb) setLeaderboard(lb);
         if (act) setActivity(act);
       })
@@ -211,6 +214,43 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Upcoming scheduled calls */}
+      {scheduled.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-semibold text-slate-900">Upcoming Scheduled Calls</h2>
+          <Card className="mt-3 overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {scheduled.map((sc) => {
+                const at = new Date(sc.scheduledAt);
+                const isToday = at.toLocaleDateString('en-CA') === new Date().toLocaleDateString('en-CA');
+                return (
+                  <div key={sc.id} className="flex items-center gap-4 px-4 py-3">
+                    <div className="flex h-10 w-14 shrink-0 flex-col items-center justify-center rounded-lg bg-blue-50">
+                      <span className="text-[10px] font-medium uppercase text-blue-400">
+                        {at.toLocaleDateString(undefined, { month: 'short' })}
+                      </span>
+                      <span className="text-sm font-bold text-blue-700">{at.getDate()}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">{sc.contactName || sc.phoneNumber}</p>
+                      {sc.notes && <p className="truncate text-xs text-slate-500">{sc.notes}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-xs font-semibold ${isToday ? 'text-amber-600' : 'text-slate-500'}`}>
+                        {isToday ? 'Today' : at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
         </>
@@ -410,6 +450,15 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
       </div>
     </div>
   );
+}
+
+interface ScheduledCallItem {
+  id: string;
+  phoneNumber: string;
+  contactName: string | null;
+  scheduledAt: string;
+  notes: string | null;
+  status: string;
 }
 
 interface ActivityItem {

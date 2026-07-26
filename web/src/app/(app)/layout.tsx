@@ -14,6 +14,7 @@ const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: HomeIcon, adminOnly: false },
   { href: '/history', label: 'Call History', icon: ClockIcon, adminOnly: false },
   { href: '/contacts', label: 'Contacts', icon: BookIcon, adminOnly: false },
+  { href: '/schedule', label: 'Schedule', icon: CalendarIcon, adminOnly: false },
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
   { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },
@@ -51,7 +52,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="flex h-16 items-center justify-between border-b border-slate-100 px-5">
           <Logo />
-          <NotificationBell />
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <NotificationBell />
+          </div>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4">
           {NAV.filter((item) => !item.adminOnly || user?.role === 'admin').map((item) => {
@@ -102,6 +106,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
           <Logo />
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <NotificationBell />
             <button onClick={logout} className="text-sm font-medium text-slate-500">
               Sign out
@@ -207,6 +212,14 @@ function SparkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+    </svg>
+  );
+}
+
 function ChartIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
@@ -220,6 +233,43 @@ function UserIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
     </svg>
+  );
+}
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(false);
+
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains('dark'));
+  }, []);
+
+  function toggle() {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle('dark', next);
+    try {
+      localStorage.setItem('sc_theme', next ? 'dark' : 'light');
+    } catch {
+      // storage unavailable — the toggle still applies for this session
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+    >
+      {dark ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.72 9.72 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+        </svg>
+      )}
+    </button>
   );
 }
 

@@ -8,6 +8,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookEvent } from '../webhooks/webhook.entity';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { SmsLog } from './sms-log.entity';
 
@@ -21,6 +23,7 @@ export class SmsService {
     private readonly telnyxProvider: TelnyxProvider,
     private readonly notificationsService: NotificationsService,
     private readonly activityService: ActivityService,
+    private readonly webhooksService: WebhooksService,
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
@@ -75,6 +78,13 @@ export class SmsService {
       );
 
       this.activityService.log(ActivityType.SMS_RECEIVED, `SMS received from ${fromNumber}`, null, sms.id).catch(() => {});
+
+      this.webhooksService.dispatch(WebhookEvent.SMS_RECEIVED, {
+        smsId: sms.id,
+        from: fromNumber,
+        body: sms.body,
+        receivedAt: sms.createdAt,
+      });
 
       const admins = await this.smsRepo.manager
         .getRepository(User)
