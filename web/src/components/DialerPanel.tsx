@@ -31,6 +31,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
   const answeredAtRef = useRef<number | null>(null);
+  const finishedRef = useRef(false);
   const dialStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -100,8 +101,12 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     setMessage('Connecting to Telnyx…');
     dialStartedAtRef.current = new Date().toISOString();
     try {
-      const { token } = await api<{ token: string }>('/calls/telnyx/token', { method: 'POST' });
+      const { token, fromNumber } = await api<{ token: string; fromNumber?: string }>(
+        '/calls/telnyx/token',
+        { method: 'POST' },
+      );
       const { TelnyxRTC } = await import('@telnyx/webrtc');
+      finishedRef.current = false;
 
       const client: any = new TelnyxRTC({ login_token: token });
       clientRef.current = client;
@@ -111,6 +116,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
         setMessage(`Dialing ${target}…`);
         callRef.current = client.newCall({
           destinationNumber: target,
+          callerNumber: fromNumber,
           audio: true,
           video: false,
         });
@@ -155,6 +161,9 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   }
 
   async function finishTelnyxCall(target: string) {
+    // hangup and destroy both arrive for one call — log it once.
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     stopTimer();
     const answered = answeredAtRef.current !== null;
     const duration = answered

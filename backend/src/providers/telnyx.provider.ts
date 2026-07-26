@@ -45,7 +45,7 @@ export class TelnyxProvider implements CallingProviderStrategy {
   }
 
   /** Issue a short-lived WebRTC token for the Telnyx JS/Flutter SDK. */
-  async createWebRtcToken(user: User): Promise<{ token: string }> {
+  async createWebRtcToken(user: User): Promise<{ token: string; fromNumber?: string }> {
     const cfg = await this.settings.getProviderSettings('telnyx');
     if (!cfg.apiKey) {
       throw new BadRequestException('Telnyx is not configured. Ask an admin to add credentials in Settings.');
@@ -95,7 +95,12 @@ export class TelnyxProvider implements CallingProviderStrategy {
       throw new BadRequestException(`Telnyx token request failed (${res.status}): ${body}`);
     }
     const token = await res.text();
-    return { token: token.replace(/^"|"$/g, '') };
+    // Callers must present one of the account's numbers as caller ID or
+    // Telnyx rejects the outbound leg. Users may carry their own direct
+    // number in providerConfig; otherwise the shared default applies.
+    const fromNumber: string | undefined =
+      user.providerConfig?.telnyxNumber || cfg.fromNumber;
+    return { token: token.replace(/^"|"$/g, ''), fromNumber };
   }
 
   /** Send an SMS via the Telnyx Messages API. Returns the provider message id. */
