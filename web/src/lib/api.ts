@@ -57,7 +57,8 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
-  if (res.status === 401) {
+  // A 401 from login itself means bad credentials, not an expired session.
+  if (res.status === 401 && !path.startsWith('/auth/login')) {
     clearSession();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';
