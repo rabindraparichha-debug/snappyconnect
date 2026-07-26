@@ -70,6 +70,15 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
         label: 'SIP Domain (optional)',
         placeholder: 'Defaults to the WSS host',
       },
+      {
+        key: 'amiUsername',
+        label: 'AMI Username',
+        placeholder: 'snappyconnect',
+        hint: 'Manager account used for click-to-call and automatic call history.',
+      },
+      { key: 'amiPassword', label: 'AMI Password', secret: true },
+      { key: 'amiHost', label: 'AMI Host', placeholder: '127.0.0.1' },
+      { key: 'amiPort', label: 'AMI Port', placeholder: '5038' },
     ],
   },
   {

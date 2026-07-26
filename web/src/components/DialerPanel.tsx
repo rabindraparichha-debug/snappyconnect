@@ -62,13 +62,21 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     timerRef.current = null;
   }
 
+  /** USA numbers dial in-browser via Telnyx when the user has USA access. */
+  function shouldUseTelnyx(target: string): boolean {
+    if (user?.provider === 'telnyx') return true;
+    const usaAccess = user?.regions?.includes('usa');
+    const n = target.replace(/[\s\-().]/g, '');
+    return Boolean(usaAccess) && (n.startsWith('+1') || /^1\d{10}$/.test(n));
+  }
+
   async function placeCall() {
     const target = number.trim();
     if (!target) return;
     setMessage('');
     setElapsed(0);
 
-    if (user?.provider === 'telnyx') {
+    if (shouldUseTelnyx(target)) {
       await placeTelnyxCall(target);
     } else {
       // Grandstream / Native Dialer: the backend does the work.
@@ -191,7 +199,8 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     } catch {
       /* noop */
     }
-    if (user?.provider !== 'telnyx') {
+    if (!clientRef.current) {
+      // Non-WebRTC call (PBX / native dialer): nothing more to wait for.
       setState('idle');
       setMessage('');
     }
@@ -248,13 +257,9 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
             <PhoneIcon /> Call
           </Button>
         ) : (
-          <>
-            {user?.provider === 'telnyx' && (
-              <Button variant="danger" onClick={hangup} className="w-full">
-                Hang up
-              </Button>
-            )}
-          </>
+          <Button variant="danger" onClick={hangup} className="w-full">
+            Hang up
+          </Button>
         )}
         {(state === 'ended' || state === 'queued' || state === 'error') && (
           <Button
@@ -281,7 +286,13 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
                 : 'your mobile phone (native dialer)'}
         </p>
       )}
-      {!user?.provider && (
+      {!user?.provider && (user?.regions?.length ?? 0) > 0 && (
+        <p className="mt-3 text-center text-xs text-slate-400">
+          Regions: {user!.regions.join(', ').toUpperCase()} — USA numbers dial in-browser via
+          Telnyx.
+        </p>
+      )}
+      {!user?.provider && (user?.regions?.length ?? 0) === 0 && (
         <p className="mt-3 text-center text-xs text-amber-600">
           No calling provider assigned — ask your administrator.
         </p>
