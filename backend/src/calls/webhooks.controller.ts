@@ -1,8 +1,10 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { SmsService } from '../sms/sms.service';
 import { CallsService } from './calls.service';
 
+@ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {
   constructor(

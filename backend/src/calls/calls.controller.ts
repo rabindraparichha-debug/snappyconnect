@@ -10,8 +10,15 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CallSource } from '../common/enums';
 import { AsteriskProvider } from '../providers/asterisk.provider';
@@ -20,10 +27,12 @@ import { User } from '../users/user.entity';
 import { CallsService } from './calls.service';
 import { CompleteRequestDto } from './dto/complete-request.dto';
 import { InitiateCallDto } from './dto/initiate-call.dto';
-import { LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
+import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
 
+@ApiTags('Calls')
+@ApiBearerAuth()
 @Controller('calls')
 export class CallsController {
   constructor(
@@ -74,6 +83,11 @@ export class CallsController {
     return this.callsService.logCall(user, dto);
   }
 
+  @Patch('bulk')
+  bulkUpdate(@CurrentUser() user: User, @Body() dto: BulkUpdateCallsDto) {
+    return this.callsService.bulkUpdate(user, dto);
+  }
+
   @Patch('log/:id')
   updateLog(
     @CurrentUser() user: User,
@@ -115,6 +129,84 @@ export class CallsController {
   @Post('sync')
   syncCalls(@CurrentUser() user: User, @Body() dto: SyncCallsDto) {
     return this.callsService.syncCalls(user, dto);
+  }
+
+  // ----- Contacts timeline -----
+
+  @Get('contacts')
+  contacts(
+    @CurrentUser() user: User,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.callsService.contacts(user, {
+      q,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('contacts/:phoneNumber')
+  contactHistory(
+    @CurrentUser() user: User,
+    @Param('phoneNumber') phoneNumber: string,
+  ) {
+    return this.callsService.contactHistory(user, decodeURIComponent(phoneNumber));
+  }
+
+  // ----- Follow-ups -----
+
+  @Get('follow-ups')
+  followUps(
+    @CurrentUser() user: User,
+    @Query('limit') limit?: string,
+  ) {
+    return this.callsService.upcomingFollowUps(user, limit ? Number(limit) : 10);
+  }
+
+  // ----- Recording upload -----
+
+  @Post('log/:id/recording')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          const dir = process.env.RECORDINGS_DIR || '/opt/snappyconnect/recordings';
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          cb(null, dir);
+        },
+        filename: (_req, file, cb) => {
+          const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
+          cb(null, unique + extname(file.originalname));
+        },
+      }),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async uploadRecording(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const url = `/api/v1/calls/recordings/${file.filename}`;
+    await this.callsService.updateLog(user, id, { recordingUrl: url });
+    return { recordingUrl: url };
+  }
+
+  @Get('recordings/:filename')
+  serveRecording(
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    const dir = process.env.RECORDINGS_DIR || '/opt/snappyconnect/recordings';
+    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '');
+    const filePath = join(dir, safeName);
+    if (!existsSync(filePath)) {
+      res.status(404).json({ message: 'Recording not found' });
+      return;
+    }
+    res.sendFile(filePath);
   }
 
   // ----- History -----

@@ -1,7 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/notification.entity';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
 import { SendSmsDto } from './dto/send-sms.dto';
@@ -9,10 +11,13 @@ import { SmsLog } from './sms-log.entity';
 
 @Injectable()
 export class SmsService {
+  private readonly logger = new Logger(SmsService.name);
+
   constructor(
     @InjectRepository(SmsLog)
     private readonly smsRepo: Repository<SmsLog>,
     private readonly telnyxProvider: TelnyxProvider,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
@@ -52,16 +57,30 @@ export class SmsService {
     if (!eventType?.startsWith('message.') || !payload) return;
 
     if (eventType === 'message.received') {
-      await this.smsRepo.save(
+      const fromNumber = payload.from?.phone_number ?? 'unknown';
+      const sms = await this.smsRepo.save(
         this.smsRepo.create({
           userId: null,
-          phoneNumber: payload.from?.phone_number ?? 'unknown',
+          phoneNumber: fromNumber,
           direction: SmsDirection.INBOUND,
           body: payload.text ?? '',
           status: SmsStatus.RECEIVED,
           externalId: payload.id ?? null,
         }),
       );
+
+      const admins = await this.smsRepo.manager
+        .getRepository(User)
+        .find({ where: { role: Role.ADMIN } });
+      for (const admin of admins) {
+        this.notificationsService.create(
+          admin.id,
+          NotificationType.INBOUND_SMS,
+          `New SMS from ${fromNumber}`,
+          (payload.text ?? '').slice(0, 100),
+          sms.id,
+        ).catch((err) => this.logger.warn('Failed to create SMS notification', err));
+      }
       return;
     }
 

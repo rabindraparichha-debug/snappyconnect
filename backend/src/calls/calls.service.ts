@@ -17,13 +17,15 @@ import {
   Role,
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/notification.entity';
 import { ProvidersService } from '../providers/providers.service';
 import { InitiateCallResult } from '../providers/provider.interface';
 import { User } from '../users/user.entity';
 import { CallLog } from './call-log.entity';
 import { CallRequest } from './call-request.entity';
 import { CompleteRequestDto } from './dto/complete-request.dto';
-import { LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
+import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
 
@@ -37,6 +39,7 @@ export class CallsService {
     @InjectRepository(CallRequest)
     private readonly requestsRepo: Repository<CallRequest>,
     private readonly providersService: ProvidersService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ---------- Initiation ----------
@@ -91,7 +94,7 @@ export class CallsService {
   // ---------- Client-reported logs (web dialer / mobile Telnyx) ----------
 
   async logCall(user: User, dto: LogCallDto): Promise<CallLog> {
-    return this.callLogsRepo.save(
+    const log = await this.callLogsRepo.save(
       this.callLogsRepo.create({
         userId: user.id,
         phoneNumber: dto.phoneNumber,
@@ -103,8 +106,32 @@ export class CallsService {
         endedAt: dto.endedAt ? new Date(dto.endedAt) : null,
         externalId: dto.externalId ?? null,
         metadata: dto.metadata ?? null,
+        contactName: dto.contactName ?? null,
+        candidateId: dto.candidateId ?? null,
+        jobId: dto.jobId ?? null,
+        companyId: dto.companyId ?? null,
+        region: dto.region ?? null,
+        country: dto.country ?? null,
+        source: dto.source ?? null,
+        ringTimeSeconds: dto.ringTimeSeconds ?? 0,
+        notes: dto.notes ?? null,
+        followUpDate: dto.followUpDate ? new Date(dto.followUpDate) : null,
+        device: dto.device ?? null,
+        ipAddress: dto.ipAddress ?? null,
       }),
     );
+
+    if (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER) {
+      this.notificationsService.create(
+        user.id,
+        NotificationType.MISSED_CALL,
+        `Missed call from ${dto.phoneNumber}`,
+        dto.contactName ?? undefined,
+        log.id,
+      ).catch((err) => this.logger.warn('Failed to create notification', err));
+    }
+
+    return log;
   }
 
   async updateLog(user: User, id: string, dto: UpdateCallLogDto): Promise<CallLog> {
@@ -117,7 +144,28 @@ export class CallsService {
     if (dto.durationSeconds !== undefined) log.durationSeconds = dto.durationSeconds;
     if (dto.endedAt) log.endedAt = new Date(dto.endedAt);
     if (dto.externalId) log.externalId = dto.externalId;
+    if (dto.contactName !== undefined) log.contactName = dto.contactName;
+    if (dto.notes !== undefined) log.notes = dto.notes;
+    if (dto.followUpDate !== undefined) log.followUpDate = dto.followUpDate ? new Date(dto.followUpDate) : null;
+    if (dto.recordingUrl !== undefined) log.recordingUrl = dto.recordingUrl;
+    if (dto.aiSummary !== undefined) log.aiSummary = dto.aiSummary;
+    if (dto.transcript !== undefined) log.transcript = dto.transcript;
     return this.callLogsRepo.save(log);
+  }
+
+  async bulkUpdate(user: User, dto: BulkUpdateCallsDto): Promise<{ updated: number }> {
+    const qb = this.callLogsRepo.createQueryBuilder('c').whereInIds(dto.ids);
+    if (user.role !== Role.ADMIN) {
+      qb.andWhere('c.userId = :uid', { uid: user.id });
+    }
+    const logs = await qb.getMany();
+    for (const log of logs) {
+      if (dto.notes !== undefined) log.notes = dto.notes;
+      if (dto.contactName !== undefined) log.contactName = dto.contactName;
+      if (dto.followUpDate !== undefined) log.followUpDate = dto.followUpDate ? new Date(dto.followUpDate) : null;
+    }
+    await this.callLogsRepo.save(logs);
+    return { updated: logs.length };
   }
 
   // ---------- History ----------
@@ -135,7 +183,11 @@ export class CallsService {
     qb.take(10000);
     const rows = await qb.getMany();
 
-    const header = ['Date', 'Time', 'User', 'Phone Number', 'Provider', 'Direction', 'Duration (s)', 'Status'];
+    const header = [
+      'Date', 'Time', 'User', 'Phone Number', 'Contact', 'Provider',
+      'Region', 'Direction', 'Source', 'Duration (s)', 'Ring (s)',
+      'Status', 'Notes', 'Follow-up',
+    ];
     const lines = [header.join(',')];
     for (const row of rows) {
       const at = row.startedAt ?? row.createdAt;
@@ -145,10 +197,16 @@ export class CallsService {
           at.toISOString().slice(11, 19),
           row.user ? `${row.user.name} <${row.user.email}>` : '',
           row.phoneNumber,
+          row.contactName ?? '',
           row.provider,
+          row.region ?? '',
           row.direction,
+          row.source ?? '',
           String(row.durationSeconds),
+          String(row.ringTimeSeconds ?? 0),
           row.status,
+          row.notes ?? '',
+          row.followUpDate ? row.followUpDate.toISOString().slice(0, 10) : '',
         ]
           .map(csvEscape)
           .join(','),
@@ -283,6 +341,77 @@ export class CallsService {
       imported++;
     }
     return { imported, skipped };
+  }
+
+  // ---------- Contacts timeline ----------
+
+  async contacts(user: User, query: { q?: string; page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+    const qb = this.callLogsRepo
+      .createQueryBuilder('call')
+      .select('call.phoneNumber', 'phoneNumber')
+      .addSelect('MAX(call.contactName)', 'contactName')
+      .addSelect('COUNT(*)::int', 'totalCalls')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE call.status IN ('completed','answered'))::int`,
+        'connectedCalls',
+      )
+      .addSelect('SUM(call.durationSeconds)::int', 'totalTalkTime')
+      .addSelect('MAX(call.createdAt)', 'lastCallAt')
+      .addSelect('MIN(call.createdAt)', 'firstCallAt')
+      .groupBy('call.phoneNumber')
+      .orderBy('"lastCallAt"', 'DESC');
+
+    if (user.role !== Role.ADMIN) {
+      qb.andWhere('call.userId = :uid', { uid: user.id });
+    }
+    if (query.q) {
+      qb.andWhere(
+        '(call.phoneNumber ILIKE :q OR call.contactName ILIKE :q)',
+        { q: `%${query.q}%` },
+      );
+    }
+
+    const countQb = qb.clone();
+    const totalResult = await this.callLogsRepo.query(
+      `SELECT COUNT(*) as count FROM (${countQb.getQuery()}) sub`,
+      countQb.getParameters() ? Object.values(countQb.getParameters()) : [],
+    );
+    const total = parseInt(totalResult?.[0]?.count ?? '0', 10);
+
+    qb.offset((page - 1) * limit).limit(limit);
+    const items = await qb.getRawMany();
+    return { items, total, page, limit };
+  }
+
+  async contactHistory(user: User, phoneNumber: string) {
+    const qb = this.callLogsRepo
+      .createQueryBuilder('call')
+      .leftJoinAndSelect('call.user', 'user')
+      .where('call.phoneNumber = :phone', { phone: phoneNumber })
+      .orderBy('call.createdAt', 'DESC');
+
+    if (user.role !== Role.ADMIN) {
+      qb.andWhere('call.userId = :uid', { uid: user.id });
+    }
+    return qb.getMany();
+  }
+
+  // ---------- Follow-ups ----------
+
+  async upcomingFollowUps(user: User, limit = 10) {
+    const qb = this.callLogsRepo
+      .createQueryBuilder('call')
+      .leftJoinAndSelect('call.user', 'user')
+      .where('call.followUpDate IS NOT NULL')
+      .andWhere('call.followUpDate >= :today', { today: new Date().toISOString().slice(0, 10) })
+      .orderBy('call.followUpDate', 'ASC')
+      .take(limit);
+
+    if (user.role !== Role.ADMIN) {
+      qb.andWhere('call.userId = :uid', { uid: user.id });
+    }
+    return qb.getMany();
   }
 
   // ---------- Telnyx webhooks ----------

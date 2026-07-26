@@ -3,12 +3,15 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AiModule } from './ai/ai.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CallsModule } from './calls/calls.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { ProvidersModule } from './providers/providers.module';
 import { SeedModule } from './seed/seed.module';
 import { SettingsModule } from './settings/settings.module';
@@ -31,6 +34,8 @@ import { UsersModule } from './users/users.module';
         synchronize: config.get<string>('DATABASE_SYNCHRONIZE', 'true') === 'true',
       }),
     }),
+    AiModule,
+    AnalyticsModule,
     AuthModule,
     UsersModule,
     SettingsModule,
@@ -38,6 +43,7 @@ import { UsersModule } from './users/users.module';
     CallsModule,
     SmsModule,
     DashboardModule,
+    NotificationsModule,
     SeedModule,
   ],
   controllers: [AppController],

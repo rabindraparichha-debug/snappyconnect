@@ -6,11 +6,11 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
-import { CallDirection, CallStatus } from '../../common/enums';
+import { CallDirection, CallSource, CallStatus, Region } from '../../common/enums';
 
-/** Used by the web dialer / mobile app to record a call outcome. */
 export class LogCallDto {
   @IsString()
   @IsNotEmpty()
@@ -43,6 +43,75 @@ export class LogCallDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  // Phase 1 enrichment fields
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  candidateId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  jobId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  companyId?: string;
+
+  @IsOptional()
+  @IsEnum(Region)
+  region?: Region;
+
+  @IsOptional()
+  @IsString()
+  country?: string;
+
+  @IsOptional()
+  @IsEnum(CallSource)
+  source?: CallSource;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  ringTimeSeconds?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsDateString()
+  followUpDate?: string;
+
+  @IsOptional()
+  @IsString()
+  device?: string;
+
+  @IsOptional()
+  @IsString()
+  ipAddress?: string;
+}
+
+export class BulkUpdateCallsDto {
+  @IsNotEmpty()
+  @IsUUID('4', { each: true })
+  ids: string[];
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsDateString()
+  followUpDate?: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
 }
 
 export class UpdateCallLogDto {
@@ -62,4 +131,28 @@ export class UpdateCallLogDto {
   @IsOptional()
   @IsString()
   externalId?: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsDateString()
+  followUpDate?: string;
+
+  @IsOptional()
+  @IsString()
+  recordingUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  aiSummary?: string;
+
+  @IsOptional()
+  @IsString()
+  transcript?: string;
 }

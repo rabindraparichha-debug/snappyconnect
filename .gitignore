@@ -26,3 +26,4 @@ build/
 *.log
 deploy/.secrets.env
 deploy/.sip-accounts
+deploy/dinstar-tunnel-key

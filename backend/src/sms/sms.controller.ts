@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -18,6 +19,8 @@ class QuerySmsDto {
   limit?: number = 20;
 }
 
+@ApiTags('SMS')
+@ApiBearerAuth()
 @Controller('sms')
 export class SmsController {
   constructor(private readonly smsService: SmsService) {}

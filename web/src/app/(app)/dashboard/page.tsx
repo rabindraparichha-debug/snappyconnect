@@ -5,6 +5,7 @@ import { api, getStoredUser } from '@/lib/api';
 import type {
   CallLog,
   DashboardStats,
+  FollowUp,
   LeaderboardEntry,
   Paginated,
   RecruiterStats,
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const [recruiter, setRecruiter] = useState<RecruiterStats | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,17 +34,19 @@ export default function DashboardPage() {
       api<Paginated<CallLog>>('/calls', { query: { limit: 5 } }),
       api<RecruiterStats>('/analytics/recruiter'),
       api<TrendPoint[]>('/analytics/recruiter/trend', { query: { granularity: 'day' } }),
+      api<FollowUp[]>('/calls/follow-ups', { query: { limit: 5 } }),
     ];
     if (isAdmin) {
       fetches.push(api<LeaderboardEntry[]>('/analytics/team/leaderboard', { query: { limit: 5 } }));
     }
 
     Promise.all(fetches)
-      .then(([s, c, r, t, lb]) => {
+      .then(([s, c, r, t, fu, lb]) => {
         setStats(s);
         setRecent(c.items);
         setRecruiter(r);
         setTrend(t);
+        setFollowUps(fu);
         if (lb) setLeaderboard(lb);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
@@ -179,6 +183,46 @@ export default function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Follow-up reminders */}
+      {followUps.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-semibold text-slate-900">Upcoming Follow-ups</h2>
+          <Card className="mt-3 overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {followUps.map((fu) => {
+                const isToday = fu.followUpDate?.slice(0, 10) === new Date().toISOString().slice(0, 10);
+                const isPast = fu.followUpDate && new Date(fu.followUpDate) < new Date(new Date().toISOString().slice(0, 10));
+                return (
+                  <div key={fu.id} className="flex items-center gap-4 px-4 py-3">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
+                      isPast ? 'bg-rose-100 text-rose-700' : isToday ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      {isPast ? '!' : isToday ? 'T' : new Date(fu.followUpDate).getDate()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">
+                        {fu.contactName || fu.phoneNumber}
+                      </p>
+                      {fu.notes && (
+                        <p className="truncate text-xs text-slate-500">{fu.notes}</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-xs font-semibold ${
+                        isPast ? 'text-rose-600' : isToday ? 'text-amber-600' : 'text-slate-500'
+                      }`}>
+                        {isPast ? 'Overdue' : isToday ? 'Today' : new Date(fu.followUpDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </p>
+                      <p className="text-xs text-slate-400">{fu.phoneNumber}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
         </>

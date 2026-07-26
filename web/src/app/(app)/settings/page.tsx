@@ -94,6 +94,27 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
       { key: 'notes', label: 'Notes', placeholder: 'Trunk name, SIM slots…' },
     ],
   },
+  {
+    key: 'ai',
+    title: 'AI Assistant',
+    description:
+      'Configure the AI assistant that helps recruiters with messaging, interview prep, and more. Supports any OpenAI-compatible API.',
+    fields: [
+      { key: 'apiKey', label: 'API Key', secret: true, placeholder: 'sk-…' },
+      {
+        key: 'model',
+        label: 'Model',
+        placeholder: 'gpt-4o-mini',
+        hint: 'Model ID. Defaults to gpt-4o-mini. Works with OpenAI, Groq, OpenRouter, etc.',
+      },
+      {
+        key: 'baseUrl',
+        label: 'Base URL (optional)',
+        placeholder: 'https://api.openai.com/v1',
+        hint: 'Override for non-OpenAI providers (e.g. https://api.groq.com/openai/v1).',
+      },
+    ],
+  },
 ];
 
 export default function SettingsPage() {

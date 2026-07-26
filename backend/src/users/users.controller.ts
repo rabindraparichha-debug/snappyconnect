@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role, UserStatus } from '../common/enums';
 import { AssignProviderDto } from './dto/assign-provider.dto';
@@ -24,6 +25,8 @@ class SetStatusDto {
   status: UserStatus;
 }
 
+@ApiTags('Users')
+@ApiBearerAuth()
 @Controller('users')
 @Roles(Role.ADMIN)
 export class UsersController {
