@@ -223,7 +223,8 @@ export class AnalyticsService {
   }
 
   private resolveDateRange(query: AnalyticsQueryDto): { from: Date; to: Date } {
-    const to = query.to ? new Date(query.to) : new Date();
+    let to = query.to ? new Date(query.to) : new Date();
+    if (query.to) to = new Date(to.getTime() + 86_400_000);
     const from = query.from ? new Date(query.from) : new Date(to.getTime() - 30 * 86_400_000);
     return { from, to };
   }
