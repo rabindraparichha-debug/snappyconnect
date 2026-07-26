@@ -9,7 +9,7 @@ import {
   IsUUID,
   Min,
 } from 'class-validator';
-import { CallDirection, CallSource, CallStatus, Region } from '../../common/enums';
+import { CallDirection, CallDisposition, CallSource, CallStatus, Region } from '../../common/enums';
 
 export class LogCallDto {
   @IsString()
@@ -112,6 +112,10 @@ export class BulkUpdateCallsDto {
   @IsOptional()
   @IsString()
   contactName?: string;
+
+  @IsOptional()
+  @IsEnum(CallDisposition)
+  disposition?: CallDisposition;
 }
 
 export class UpdateCallLogDto {
@@ -155,4 +159,8 @@ export class UpdateCallLogDto {
   @IsOptional()
   @IsString()
   transcript?: string;
+
+  @IsOptional()
+  @IsEnum(CallDisposition)
+  disposition?: CallDisposition;
 }

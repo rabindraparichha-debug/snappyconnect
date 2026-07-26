@@ -8,7 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { CallDirection, CallingProvider, CallStatus } from '../../common/enums';
+import { CallDirection, CallDisposition, CallingProvider, CallStatus } from '../../common/enums';
 
 export class QueryCallsDto {
   /** Free-text search over phone number and user name/email. */
@@ -31,6 +31,10 @@ export class QueryCallsDto {
   @IsOptional()
   @IsEnum(CallStatus)
   status?: CallStatus;
+
+  @IsOptional()
+  @IsEnum(CallDisposition)
+  disposition?: CallDisposition;
 
   @IsOptional()
   @IsDateString()

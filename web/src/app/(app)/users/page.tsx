@@ -15,6 +15,7 @@ interface UserForm {
   role: 'admin' | 'user';
   provider: '' | CallingProvider;
   telnyxCredentialId: string;
+  ivrDigit: string;
   grandstreamExtension: string;
   sipUsername: string;
   sipPassword: string;
@@ -30,6 +31,7 @@ const EMPTY_FORM: UserForm = {
   role: 'user',
   provider: '',
   telnyxCredentialId: '',
+  ivrDigit: '',
   grandstreamExtension: '',
   sipUsername: '',
   sipPassword: '',
@@ -52,6 +54,7 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,6 +94,7 @@ export default function UsersPage() {
       role: user.role,
       provider: user.provider ?? '',
       telnyxCredentialId: user.providerConfig?.telnyxCredentialId ?? '',
+      ivrDigit: user.providerConfig?.ivrDigit ?? '',
       grandstreamExtension: user.providerConfig?.extension ?? '',
       sipUsername: user.providerConfig?.sipUsername ?? '',
       sipPassword: user.providerConfig?.sipPassword ?? '',
@@ -106,8 +110,16 @@ export default function UsersPage() {
     setFormError(null);
 
     const providerConfig: Record<string, string> = {};
-    if (form.provider === 'telnyx' && form.telnyxCredentialId) {
+    // Keep provisioned line details (number/connection) that the UI doesn't edit.
+    if (editing?.providerConfig?.telnyxNumber) {
+      providerConfig.telnyxNumber = editing.providerConfig.telnyxNumber;
+      providerConfig.telnyxConnectionId = editing.providerConfig.telnyxConnectionId;
+    }
+    if (form.telnyxCredentialId) {
       providerConfig.telnyxCredentialId = form.telnyxCredentialId;
+    }
+    if (form.ivrDigit.trim()) {
+      providerConfig.ivrDigit = form.ivrDigit.trim();
     }
     if (form.provider === 'grandstream' && form.grandstreamExtension) {
       providerConfig.extension = form.grandstreamExtension.trim();
@@ -142,6 +154,31 @@ export default function UsersPage() {
       setFormError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Gives the user their own US number so inbound calls ring their browser.
+   * Reuses a spare number on the account, otherwise buys one ($1/month).
+   */
+  async function provisionLine(user: User) {
+    const spare = await api<string[]>('/users/telnyx/available-numbers').catch(() => [] as string[]);
+    const message = spare.length
+      ? `Assign ${spare[0]} to ${user.name} as their direct line?`
+      : `No spare numbers on the account. Buy a new US number (about $1 up front, $1/month) for ${user.name}?`;
+    if (!window.confirm(message)) return;
+
+    setProvisioning(user.id);
+    try {
+      await api(`/users/${user.id}/telnyx-line`, {
+        method: 'POST',
+        body: spare.length ? { phoneNumber: spare[0] } : {},
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not assign a number');
+    } finally {
+      setProvisioning(null);
     }
   }
 
@@ -225,6 +262,7 @@ export default function UsersPage() {
                   <Th>Mobile</Th>
                   <Th>Country</Th>
                   <Th>Provider</Th>
+                  <Th>Direct line</Th>
                   <Th>Role</Th>
                   <Th>Status</Th>
                   <Th>Actions</Th>
@@ -255,6 +293,32 @@ export default function UsersPage() {
                         PROVIDER_LABELS[user.provider]
                       ) : (
                         <span className="text-slate-400">Unassigned</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {user.providerConfig?.telnyxNumber ? (
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium text-slate-700">
+                            {user.providerConfig.telnyxNumber}
+                          </span>
+                          {user.providerConfig.ivrDigit && (
+                            <span
+                              title="Board-line menu digit"
+                              className="rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-700"
+                            >
+                              ext {user.providerConfig.ivrDigit}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          className="!px-2 !py-1 text-xs"
+                          disabled={provisioning === user.id}
+                          onClick={() => provisionLine(user)}
+                        >
+                          {provisioning === user.id ? 'Assigning…' : 'Assign number'}
+                        </Button>
                       )}
                     </Td>
                     <Td className="capitalize">{user.role}</Td>
@@ -365,14 +429,24 @@ export default function UsersPage() {
             </Select>
           </div>
           {(form.provider === 'telnyx' || form.regions.includes('usa')) && (
-            <div>
-              <Label>Telnyx Credential ID (optional)</Label>
-              <Input
-                placeholder="Uses global credential if empty"
-                value={form.telnyxCredentialId}
-                onChange={(e) => setForm({ ...form, telnyxCredentialId: e.target.value })}
-              />
-            </div>
+            <>
+              <div>
+                <Label>Telnyx Credential ID (optional)</Label>
+                <Input
+                  placeholder="Uses global credential if empty"
+                  value={form.telnyxCredentialId}
+                  onChange={(e) => setForm({ ...form, telnyxCredentialId: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Board-line menu digit (optional)</Label>
+                <Input
+                  placeholder="1-9 — callers press this to reach them"
+                  value={form.ivrDigit}
+                  onChange={(e) => setForm({ ...form, ivrDigit: e.target.value })}
+                />
+              </div>
+            </>
           )}
 
           <div className="col-span-full">

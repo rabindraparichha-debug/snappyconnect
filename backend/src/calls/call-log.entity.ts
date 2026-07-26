@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { CallDirection, CallingProvider, CallSource, CallStatus, Region } from '../common/enums';
+import { CallDirection, CallDisposition, CallingProvider, CallSource, CallStatus, Region } from '../common/enums';
 import { User } from '../users/user.entity';
 
 @Entity('call_logs')
@@ -94,6 +94,9 @@ export class CallLog {
 
   @Column({ type: 'text', nullable: true })
   transcript: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  disposition: CallDisposition | null;
 
   @Column({ type: 'varchar', length: 32, nullable: true })
   device: string | null;

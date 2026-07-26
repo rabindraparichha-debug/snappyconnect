@@ -29,6 +29,38 @@ export interface User {
   updatedAt: string;
 }
 
+export type CallDisposition =
+  | 'interview_scheduled'
+  | 'not_interested'
+  | 'callback_requested'
+  | 'left_voicemail'
+  | 'wrong_number'
+  | 'offer_made'
+  | 'hired'
+  | 'no_answer_disposition';
+
+export const DISPOSITION_LABELS: Record<CallDisposition, string> = {
+  interview_scheduled: 'Interview Scheduled',
+  not_interested: 'Not Interested',
+  callback_requested: 'Callback Requested',
+  left_voicemail: 'Left Voicemail',
+  wrong_number: 'Wrong Number',
+  offer_made: 'Offer Made',
+  hired: 'Hired',
+  no_answer_disposition: 'No Answer',
+};
+
+export const DISPOSITION_COLORS: Record<CallDisposition, string> = {
+  interview_scheduled: 'bg-emerald-100 text-emerald-700',
+  not_interested: 'bg-slate-100 text-slate-600',
+  callback_requested: 'bg-amber-100 text-amber-700',
+  left_voicemail: 'bg-blue-100 text-blue-700',
+  wrong_number: 'bg-rose-100 text-rose-700',
+  offer_made: 'bg-violet-100 text-violet-700',
+  hired: 'bg-emerald-200 text-emerald-800',
+  no_answer_disposition: 'bg-orange-100 text-orange-700',
+};
+
 export interface CallLog {
   id: string;
   userId: string | null;
@@ -54,6 +86,7 @@ export interface CallLog {
   followUpDate: string | null;
   aiSummary: string | null;
   transcript: string | null;
+  disposition: CallDisposition | null;
   device: string | null;
   createdAt: string;
   updatedAt: string;

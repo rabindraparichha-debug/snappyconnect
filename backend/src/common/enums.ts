@@ -69,6 +69,17 @@ export enum CallSource {
   API = 'api',
 }
 
+export enum CallDisposition {
+  INTERVIEW_SCHEDULED = 'interview_scheduled',
+  NOT_INTERESTED = 'not_interested',
+  CALLBACK_REQUESTED = 'callback_requested',
+  LEFT_VOICEMAIL = 'left_voicemail',
+  WRONG_NUMBER = 'wrong_number',
+  OFFER_MADE = 'offer_made',
+  HIRED = 'hired',
+  NO_ANSWER = 'no_answer_disposition',
+}
+
 export enum SmsDirection {
   INBOUND = 'inbound',
   OUTBOUND = 'outbound',

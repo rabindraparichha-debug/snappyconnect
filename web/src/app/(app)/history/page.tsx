@@ -2,12 +2,23 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, API_URL, getToken } from '@/lib/api';
-import type { CallLog, Paginated } from '@/lib/types';
-import { PROVIDER_LABELS } from '@/lib/types';
+import type { CallDisposition, CallLog, Paginated } from '@/lib/types';
+import { DISPOSITION_COLORS, DISPOSITION_LABELS, PROVIDER_LABELS } from '@/lib/types';
 import { formatDateTime, formatDuration } from '@/lib/format';
 import { Badge, Button, Card, EmptyState, Input, Select, Spinner } from '@/components/ui';
 
 const LIMIT = 20;
+
+const QUICK_NOTES = [
+  'Candidate interested',
+  'Left voicemail',
+  'Schedule interview',
+  'Send job description',
+  'Not available now',
+  'Will call back',
+  'Offer discussed',
+  'Wrong number',
+];
 
 export default function HistoryPage() {
   const [data, setData] = useState<Paginated<CallLog> | null>(null);
@@ -19,6 +30,7 @@ export default function HistoryPage() {
   const [provider, setProvider] = useState('');
   const [direction, setDirection] = useState('');
   const [status, setStatus] = useState('');
+  const [disposition, setDisposition] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
@@ -35,7 +47,7 @@ export default function HistoryPage() {
     setError(null);
     try {
       const result = await api<Paginated<CallLog>>('/calls', {
-        query: { q, provider, direction, status, from, to, page, limit: LIMIT },
+        query: { q, provider, direction, status, disposition, from, to, page, limit: LIMIT },
       });
       setData(result);
     } catch (err) {
@@ -43,7 +55,7 @@ export default function HistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, provider, direction, status, from, to, page]);
+  }, [q, provider, direction, status, disposition, from, to, page]);
 
   useEffect(() => {
     const timeout = setTimeout(load, q ? 300 : 0);
@@ -52,7 +64,7 @@ export default function HistoryPage() {
 
   async function exportCsv() {
     const url = new URL(API_URL + '/calls/export');
-    for (const [key, value] of Object.entries({ q, provider, direction, status, from, to })) {
+    for (const [key, value] of Object.entries({ q, provider, direction, status, disposition, from, to })) {
       if (value) url.searchParams.set(key, value);
     }
     const res = await fetch(url.toString(), {
@@ -200,6 +212,26 @@ export default function HistoryPage() {
         </div>
       </Card>
 
+      {/* Disposition filter */}
+      <Card className="mt-3 p-3">
+        <div className="flex flex-wrap gap-2">
+          <span className="self-center text-xs font-medium text-slate-500">Disposition:</span>
+          {(['', ...Object.keys(DISPOSITION_LABELS)] as ('' | CallDisposition)[]).map((d) => (
+            <button
+              key={d}
+              onClick={() => { setDisposition(d); setPage(1); }}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                disposition === d
+                  ? 'bg-brand-600 text-white'
+                  : d ? DISPOSITION_COLORS[d] : 'bg-slate-100 text-slate-600'
+              } hover:opacity-80`}
+            >
+              {d ? DISPOSITION_LABELS[d] : 'All'}
+            </button>
+          ))}
+        </div>
+      </Card>
+
       {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
 
       {/* Bulk toolbar */}
@@ -308,13 +340,16 @@ export default function HistoryPage() {
                       <Badge value={call.status} />
                     </Td>
                     <Td>
-                      {(call.notes || call.followUpDate || call.recordingUrl) && (
-                        <div className="flex gap-1">
-                          {call.notes && <Pill>Notes</Pill>}
-                          {call.followUpDate && <Pill>Follow-up</Pill>}
-                          {call.recordingUrl && <Pill>Rec</Pill>}
-                        </div>
-                      )}
+                      <div className="flex flex-wrap gap-1">
+                        {call.disposition && (
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${DISPOSITION_COLORS[call.disposition]}`}>
+                            {DISPOSITION_LABELS[call.disposition]}
+                          </span>
+                        )}
+                        {call.notes && <Pill>Notes</Pill>}
+                        {call.followUpDate && <Pill>Follow-up</Pill>}
+                        {call.recordingUrl && <Pill>Rec</Pill>}
+                      </div>
                     </Td>
                   </tr>
                 ))}
@@ -377,6 +412,7 @@ function CallDetailDrawer({
   const [notes, setNotes] = useState(call.notes ?? '');
   const [contactName, setContactName] = useState(call.contactName ?? '');
   const [followUpDate, setFollowUpDate] = useState(call.followUpDate?.slice(0, 10) ?? '');
+  const [callDisposition, setCallDisposition] = useState(call.disposition ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -389,6 +425,7 @@ function CallDetailDrawer({
           notes: notes || undefined,
           contactName: contactName || undefined,
           followUpDate: followUpDate || undefined,
+          disposition: callDisposition || undefined,
         },
       });
       onUpdate(updated);
@@ -448,6 +485,18 @@ function CallDetailDrawer({
 
           <div className="space-y-3 border-t border-slate-200 pt-4">
             <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">Disposition</label>
+              <Select
+                value={callDisposition}
+                onChange={(e) => setCallDisposition(e.target.value as CallDisposition | '')}
+              >
+                <option value="">No disposition</option>
+                {Object.entries(DISPOSITION_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">Contact Name</label>
               <Input
                 value={contactName}
@@ -457,6 +506,18 @@ function CallDetailDrawer({
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">Notes</label>
+              <div className="mb-1.5 flex flex-wrap gap-1">
+                {QUICK_NOTES.map((qn) => (
+                  <button
+                    key={qn}
+                    type="button"
+                    onClick={() => setNotes((prev) => (prev ? prev + '\n' + qn : qn))}
+                    className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-200"
+                  >
+                    {qn}
+                  </button>
+                ))}
+              </div>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}

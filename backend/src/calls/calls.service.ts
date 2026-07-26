@@ -150,6 +150,7 @@ export class CallsService {
     if (dto.recordingUrl !== undefined) log.recordingUrl = dto.recordingUrl;
     if (dto.aiSummary !== undefined) log.aiSummary = dto.aiSummary;
     if (dto.transcript !== undefined) log.transcript = dto.transcript;
+    if (dto.disposition !== undefined) log.disposition = dto.disposition;
     return this.callLogsRepo.save(log);
   }
 
@@ -163,6 +164,7 @@ export class CallsService {
       if (dto.notes !== undefined) log.notes = dto.notes;
       if (dto.contactName !== undefined) log.contactName = dto.contactName;
       if (dto.followUpDate !== undefined) log.followUpDate = dto.followUpDate ? new Date(dto.followUpDate) : null;
+      if (dto.disposition !== undefined) log.disposition = dto.disposition;
     }
     await this.callLogsRepo.save(logs);
     return { updated: logs.length };
@@ -237,6 +239,7 @@ export class CallsService {
     if (query.provider) qb.andWhere('call.provider = :provider', { provider: query.provider });
     if (query.direction) qb.andWhere('call.direction = :direction', { direction: query.direction });
     if (query.status) qb.andWhere('call.status = :status', { status: query.status });
+    if (query.disposition) qb.andWhere('call.disposition = :disposition', { disposition: query.disposition });
     if (query.from) qb.andWhere('call.createdAt >= :from', { from: new Date(query.from) });
     if (query.to) qb.andWhere('call.createdAt <= :to', { to: new Date(query.to) });
 
