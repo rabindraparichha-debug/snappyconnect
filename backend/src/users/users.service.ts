@@ -81,8 +81,13 @@ export class UsersService {
       user.email = dto.email.toLowerCase();
     }
 
-    const { password, email: _email, ...rest } = dto;
+    const { password, email: _email, providerConfig, ...rest } = dto;
     Object.assign(user, rest);
+    // providerConfig holds settings from several places (SIP account, Telnyx
+    // line, IVR digit) — merge so editing one screen can't wipe the others.
+    if (providerConfig) {
+      user.providerConfig = { ...(user.providerConfig ?? {}), ...providerConfig };
+    }
     if (password) user.passwordHash = await bcrypt.hash(password, 10);
 
     const saved = await this.usersRepo.save(user);
