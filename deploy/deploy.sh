@@ -43,6 +43,7 @@ rsync -az -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-n
 
 echo "==> 3/4 Running server setup (install deps, build, restart services)"
 $SSH "VPS_IP=$VPS_IP DOMAIN=$DOMAIN WEB_PORT=$WEB_PORT DB_PASSWORD=$DB_PASSWORD JWT_SECRET=$JWT_SECRET \
+  AMI_PASSWORD=${AMI_PASSWORD:-} \
   SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY ADMIN_PASSWORD=$ADMIN_PASSWORD \
   bash /opt/snappyconnect/vps-setup.sh"
 

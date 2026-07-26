@@ -52,6 +52,12 @@ SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 ADMIN_NAME=Admin
 ADMIN_EMAIL=admin@snappyconnect.local
 ADMIN_PASSWORD=$ADMIN_PASSWORD
+# Asterisk Manager Interface (same host) — powers click-to-call and the
+# automatic call-history ingestion for UAE calls.
+ASTERISK_AMI_HOST=127.0.0.1
+ASTERISK_AMI_PORT=5038
+ASTERISK_AMI_USERNAME=snappyconnect
+ASTERISK_AMI_PASSWORD=${AMI_PASSWORD:-}
 EOF
 cd $APP_DIR/backend
 npm ci --no-audit --no-fund
