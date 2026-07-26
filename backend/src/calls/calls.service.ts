@@ -17,6 +17,8 @@ import {
   Role,
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
+import { ActivityService } from '../activity/activity.service';
+import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { ProvidersService } from '../providers/providers.service';
@@ -40,6 +42,7 @@ export class CallsService {
     private readonly requestsRepo: Repository<CallRequest>,
     private readonly providersService: ProvidersService,
     private readonly notificationsService: NotificationsService,
+    private readonly activityService: ActivityService,
   ) {}
 
   // ---------- Initiation ----------
@@ -121,6 +124,9 @@ export class CallsService {
       }),
     );
 
+    const actType = dto.direction === CallDirection.INBOUND ? ActivityType.CALL_RECEIVED : ActivityType.CALL_MADE;
+    this.activityService.log(actType, `${dto.direction} call to ${dto.phoneNumber}`, user.id, log.id).catch(() => {});
+
     if (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER) {
       this.notificationsService.create(
         user.id,
@@ -151,6 +157,17 @@ export class CallsService {
     if (dto.aiSummary !== undefined) log.aiSummary = dto.aiSummary;
     if (dto.transcript !== undefined) log.transcript = dto.transcript;
     if (dto.disposition !== undefined) log.disposition = dto.disposition;
+
+    if (dto.notes !== undefined) {
+      this.activityService.log(ActivityType.NOTE_ADDED, `Note added on ${log.phoneNumber}`, user.id, log.id).catch(() => {});
+    }
+    if (dto.followUpDate !== undefined) {
+      this.activityService.log(ActivityType.FOLLOW_UP_SET, `Follow-up set for ${log.phoneNumber}`, user.id, log.id).catch(() => {});
+    }
+    if (dto.disposition !== undefined) {
+      this.activityService.log(ActivityType.DISPOSITION_SET, `Disposition "${dto.disposition}" on ${log.phoneNumber}`, user.id, log.id).catch(() => {});
+    }
+
     return this.callLogsRepo.save(log);
   }
 

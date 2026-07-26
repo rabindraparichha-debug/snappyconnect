@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { ActivityService } from '../activity/activity.service';
+import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { TelnyxProvider } from '../providers/telnyx.provider';
@@ -18,6 +20,7 @@ export class SmsService {
     private readonly smsRepo: Repository<SmsLog>,
     private readonly telnyxProvider: TelnyxProvider,
     private readonly notificationsService: NotificationsService,
+    private readonly activityService: ActivityService,
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
@@ -44,7 +47,9 @@ export class SmsService {
       await this.smsRepo.save(log);
       throw err;
     }
-    return this.smsRepo.save(log);
+    const saved = await this.smsRepo.save(log);
+    this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${dto.to}`, user.id, saved.id).catch(() => {});
+    return saved;
   }
 
   /**
@@ -68,6 +73,8 @@ export class SmsService {
           externalId: payload.id ?? null,
         }),
       );
+
+      this.activityService.log(ActivityType.SMS_RECEIVED, `SMS received from ${fromNumber}`, null, sms.id).catch(() => {});
 
       const admins = await this.smsRepo.manager
         .getRepository(User)

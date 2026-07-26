@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,16 +39,18 @@ export default function DashboardPage() {
     ];
     if (isAdmin) {
       fetches.push(api<LeaderboardEntry[]>('/analytics/team/leaderboard', { query: { limit: 5 } }));
+      fetches.push(api<ActivityItem[]>('/activity', { query: { limit: 15 } }));
     }
 
     Promise.all(fetches)
-      .then(([s, c, r, t, fu, lb]) => {
+      .then(([s, c, r, t, fu, lb, act]) => {
         setStats(s);
         setRecent(c.items);
         setRecruiter(r);
         setTrend(t);
         setFollowUps(fu);
         if (lb) setLeaderboard(lb);
+        if (act) setActivity(act);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
       .finally(() => setLoading(false));
@@ -183,6 +186,31 @@ export default function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Activity feed (admin) */}
+      {isAdmin && activity.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-semibold text-slate-900">Team Activity</h2>
+          <Card className="mt-3 overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {activity.map((item) => (
+                <div key={item.id} className="flex items-start gap-3 px-4 py-3">
+                  <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs ${ACTIVITY_ICON[item.type]?.bg ?? 'bg-slate-100 text-slate-500'}`}>
+                    {ACTIVITY_ICON[item.type]?.icon ?? '?'}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-700">
+                      {item.user && <span className="font-medium text-slate-900">{item.user.name} </span>}
+                      {item.summary}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-400">{timeAgo(item.createdAt)}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           </Card>
         </>
@@ -382,6 +410,35 @@ function TrendChart({ data }: { data: TrendPoint[] }) {
       </div>
     </div>
   );
+}
+
+interface ActivityItem {
+  id: string;
+  type: string;
+  summary: string;
+  createdAt: string;
+  user?: { name: string; email: string } | null;
+}
+
+const ACTIVITY_ICON: Record<string, { icon: string; bg: string }> = {
+  call_made: { icon: '↗', bg: 'bg-blue-100 text-blue-600' },
+  call_received: { icon: '↙', bg: 'bg-green-100 text-green-600' },
+  sms_sent: { icon: '✉', bg: 'bg-indigo-100 text-indigo-600' },
+  sms_received: { icon: '✉', bg: 'bg-teal-100 text-teal-600' },
+  note_added: { icon: '✎', bg: 'bg-amber-100 text-amber-600' },
+  follow_up_set: { icon: '⏰', bg: 'bg-violet-100 text-violet-600' },
+  disposition_set: { icon: '🏷', bg: 'bg-rose-100 text-rose-600' },
+};
+
+function timeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function Th({ children }: { children: React.ReactNode }) {

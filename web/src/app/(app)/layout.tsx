@@ -16,6 +16,7 @@ const NAV = [
   { href: '/contacts', label: 'Contacts', icon: BookIcon, adminOnly: false },
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
+  { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },
   { href: '/users', label: 'Users', icon: UsersIcon, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true },
   { href: '/profile', label: 'Profile', icon: UserIcon, adminOnly: false },
@@ -107,6 +108,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </header>
+        <div className="hidden border-b border-slate-200 bg-white px-4 py-3 lg:block sm:px-6 lg:px-8">
+          <GlobalSearch />
+        </div>
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
 
@@ -203,6 +207,14 @@ function SparkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function ChartIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+    </svg>
+  );
+}
+
 function UserIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
@@ -373,6 +385,150 @@ function NotificationBell() {
               ))
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SearchResult {
+  calls: Array<{ id: string; phoneNumber: string; contactName: string | null; status: string; createdAt: string; user?: { name: string } | null }>;
+  users: Array<{ id: string; name: string; email: string; role: string }>;
+  contacts: Array<{ phoneNumber: string; contactName: string | null; totalCalls: number }>;
+}
+
+function GlobalSearch() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult | null>(null);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const router = useRouter();
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  function handleChange(value: string) {
+    setQuery(value);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (value.trim().length < 2) {
+      setResults(null);
+      setOpen(false);
+      return;
+    }
+    timerRef.current = setTimeout(async () => {
+      try {
+        const res = await api<SearchResult>('/dashboard/search', { query: { q: value.trim() } });
+        setResults(res);
+        setOpen(true);
+      } catch {
+        // ignore
+      }
+    }, 300);
+  }
+
+  const hasResults = results && (results.calls.length > 0 || results.users.length > 0 || results.contacts.length > 0);
+
+  return (
+    <div ref={ref} className="relative w-full max-w-lg">
+      <div className="relative">
+        <svg viewBox="0 0 20 20" fill="currentColor" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400">
+          <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
+        </svg>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => handleChange(e.target.value)}
+          onFocus={() => results && setOpen(true)}
+          placeholder="Search calls, contacts, users..."
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-400"
+        />
+      </div>
+
+      {open && results && (
+        <div className="absolute left-0 top-full z-50 mt-1.5 w-full rounded-xl bg-white shadow-xl ring-1 ring-slate-200">
+          {!hasResults ? (
+            <p className="px-4 py-6 text-center text-sm text-slate-400">No results found</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+              {results.contacts.length > 0 && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Contacts</p>
+                  {results.contacts.map((c) => (
+                    <button
+                      key={c.phoneNumber}
+                      onClick={() => { setOpen(false); setQuery(''); router.push(`/contacts?q=${encodeURIComponent(c.phoneNumber)}`); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600">
+                        {(c.contactName ?? c.phoneNumber).charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{c.contactName ?? c.phoneNumber}</p>
+                        {c.contactName && <p className="text-xs text-slate-400">{c.phoneNumber}</p>}
+                      </div>
+                      <span className="text-xs text-slate-400">{c.totalCalls} calls</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {results.calls.length > 0 && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Calls</p>
+                  {results.calls.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => { setOpen(false); setQuery(''); router.push(`/history?q=${encodeURIComponent(c.phoneNumber)}`); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500">
+                        {c.status === 'completed' || c.status === 'answered' ? '✓' : c.status === 'missed' || c.status === 'no_answer' ? '✗' : '→'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{c.contactName ?? c.phoneNumber}</p>
+                        <p className="text-xs text-slate-400">
+                          {c.user?.name ? `${c.user.name} · ` : ''}{new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                      <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                        c.status === 'completed' || c.status === 'answered' ? 'bg-emerald-50 text-emerald-600' :
+                        c.status === 'missed' || c.status === 'no_answer' ? 'bg-amber-50 text-amber-600' :
+                        'bg-slate-100 text-slate-500'
+                      )}>{c.status.replace('_', ' ')}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {results.users.length > 0 && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Users</p>
+                  {results.users.map((u) => (
+                    <button
+                      key={u.id}
+                      onClick={() => { setOpen(false); setQuery(''); router.push(`/users`); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-600">
+                        {u.name.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{u.name}</p>
+                        <p className="text-xs text-slate-400">{u.email}</p>
+                      </div>
+                      <span className="text-[10px] font-semibold uppercase text-slate-400">{u.role}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

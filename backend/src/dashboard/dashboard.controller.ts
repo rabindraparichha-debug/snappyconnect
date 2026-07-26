@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -13,5 +13,10 @@ export class DashboardController {
   @Get('stats')
   stats(@CurrentUser() user: User) {
     return this.dashboardService.stats(user);
+  }
+
+  @Get('search')
+  search(@CurrentUser() user: User, @Query('q') q: string) {
+    return this.dashboardService.search(user, q);
   }
 }

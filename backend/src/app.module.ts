@@ -16,6 +16,7 @@ import { ProvidersModule } from './providers/providers.module';
 import { SeedModule } from './seed/seed.module';
 import { SettingsModule } from './settings/settings.module';
 import { SmsModule } from './sms/sms.module';
+import { ActivityModule } from './activity/activity.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -44,6 +45,7 @@ import { UsersModule } from './users/users.module';
     SmsModule,
     DashboardModule,
     NotificationsModule,
+    ActivityModule,
     SeedModule,
   ],
   controllers: [AppController],
