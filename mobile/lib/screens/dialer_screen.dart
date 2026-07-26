@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../api/api_client.dart';
 import '../models.dart';
 import '../region.dart';
 import '../services/asterisk_call_service.dart';
+import '../services/call_service_keeper.dart';
+import 'incoming_call_screen.dart';
 import '../services/native_dialer_service.dart';
 import '../services/telnyx_call_service.dart';
 
@@ -80,6 +83,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     try {
       final mic = await Permission.microphone.request();
       if (!mic.isGranted) return;
+      await CallServiceKeeper.requestPermissions();
       final cfg = await ApiClient.instance.get('/calls/asterisk/config') as Map<String, dynamic>;
       await _asterisk.connect(
         wssUrl: cfg['wssUrl'] as String,
@@ -90,6 +94,9 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
         onState: _onAsteriskState,
         onIncoming: _onIncomingCall,
       );
+      await CallServiceKeeper.start(
+        line: (cfg['sipUsername'] as String?) ?? 'SIP',
+      );
       if (mounted) setState(() => _status = 'Ready for calls');
     } catch (_) {
       // Not fatal: outbound dialing will retry the connection.
@@ -98,25 +105,13 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   Future<void> _onIncomingCall(dynamic call, String fromNumber) async {
     if (!mounted) return;
-    final accept = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Incoming call'),
-        content: Text(fromNumber),
-        actions: [
-          TextButton.icon(
-            onPressed: () => Navigator.pop(context, false),
-            icon: const Icon(Icons.call_end, color: Color(0xFFE11D48)),
-            label: const Text('Decline'),
-          ),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669)),
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.call),
-            label: const Text('Answer'),
-          ),
-        ],
+    // Bring the app forward if it is in the background, then ring full-screen.
+    FlutterForegroundTask.launchApp();
+    if (!mounted) return;
+    final accept = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => IncomingCallScreen(fromNumber: fromNumber),
       ),
     );
 

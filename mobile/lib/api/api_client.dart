@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../services/call_service_keeper.dart';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,6 +60,9 @@ class ApiClient {
   }
 
   Future<void> logout() async {
+    // Stop the on-duty service so its notification does not linger after
+    // signing out.
+    await CallServiceKeeper.stop();
     _token = null;
     currentUser = null;
     final prefs = await SharedPreferences.getInstance();

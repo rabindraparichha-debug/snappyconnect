@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.snappyconnect.snappyconnect_mobile"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_ringtone_player requires a newer compileSdk than the Flutter default.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
