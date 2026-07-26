@@ -162,17 +162,20 @@ export default function UsersPage() {
    * Reuses a spare number on the account, otherwise buys one ($1/month).
    */
   async function provisionLine(user: User) {
-    const spare = await api<string[]>('/users/telnyx/available-numbers').catch(() => [] as string[]);
-    const message = spare.length
-      ? `Assign ${spare[0]} to ${user.name} as their direct line?`
-      : `No spare numbers on the account. Buy a new US number (about $1 up front, $1/month) for ${user.name}?`;
-    if (!window.confirm(message)) return;
-
     setProvisioning(user.id);
+    setError(null);
     try {
+      // Never offer to buy just because the lookup failed — surface that error.
+      const spare = await api<string[]>('/users/telnyx/available-numbers');
+      const chosen = spare[0];
+      const message = chosen
+        ? `Assign ${chosen} to ${user.name} as their direct line?`
+        : `No spare numbers on the account. Buy a new US number (about $1 up front, $1/month) for ${user.name}?`;
+      if (!window.confirm(message)) return;
+
       await api(`/users/${user.id}/telnyx-line`, {
         method: 'POST',
-        body: spare.length ? { phoneNumber: spare[0] } : {},
+        body: chosen ? { phoneNumber: chosen } : {},
       });
       await load();
     } catch (err) {
