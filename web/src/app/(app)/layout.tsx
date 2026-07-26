@@ -12,6 +12,7 @@ import { cn } from '@/components/ui';
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: HomeIcon, adminOnly: false },
   { href: '/history', label: 'Call History', icon: ClockIcon, adminOnly: false },
+  { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/users', label: 'Users', icon: UsersIcon, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true },
   { href: '/profile', label: 'Profile', icon: UserIcon, adminOnly: false },
@@ -148,6 +149,17 @@ function ClockIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+function ChatIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+      />
     </svg>
   );
 }

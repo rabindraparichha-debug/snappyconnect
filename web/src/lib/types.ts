@@ -70,6 +70,29 @@ export interface InitiateCallResult {
   message: string;
 }
 
+export type SmsDirection = 'inbound' | 'outbound';
+export type SmsStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'received';
+
+export interface SmsLog {
+  id: string;
+  userId: string | null;
+  user: User | null;
+  phoneNumber: string;
+  direction: SmsDirection;
+  body: string;
+  status: SmsStatus;
+  externalId: string | null;
+  createdAt: string;
+}
+
+export interface SmsThread {
+  phoneNumber: string;
+  lastMessage: string;
+  lastAt: string;
+  direction: SmsDirection;
+  total: number;
+}
+
 export type Region = 'india' | 'usa' | 'uae';
 
 export const REGIONS: Region[] = ['india', 'usa', 'uae'];

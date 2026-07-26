@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CallingProvider, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
 import { SendSmsDto } from './dto/send-sms.dto';
@@ -16,9 +16,10 @@ export class SmsService {
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
-    // SMS is a Telnyx feature; only Telnyx-assigned users (or admins) can send.
-    if (user.role !== Role.ADMIN && user.provider !== CallingProvider.TELNYX) {
-      throw new BadRequestException('SMS is only available for users on the Telnyx provider.');
+    if (!this.canSendSms(user)) {
+      throw new BadRequestException(
+        'SMS is only available to users with USA calling access. Ask an admin to enable it.',
+      );
     }
 
     const log = this.smsRepo.create({
@@ -91,5 +92,66 @@ export class SmsService {
 
     const [items, total] = await qb.getManyAndCount();
     return { items, total, page, limit };
+  }
+
+  /**
+   * Conversation list for the shared company number: one entry per contact with
+   * the most recent message. The number is shared by the team, so inbound
+   * replies are visible to everyone with SMS access (like a shared inbox).
+   */
+  async threads(user: User): Promise<
+    Array<{ phoneNumber: string; lastMessage: string; lastAt: Date; direction: SmsDirection; total: number }>
+  > {
+    this.assertSmsAccess(user);
+    const rows = await this.smsRepo
+      .createQueryBuilder('sms')
+      .select('sms.phoneNumber', 'phoneNumber')
+      .addSelect('MAX(sms.createdAt)', 'lastAt')
+      .addSelect('COUNT(*)', 'total')
+      .groupBy('sms.phoneNumber')
+      .orderBy('MAX(sms.createdAt)', 'DESC')
+      .limit(200)
+      .getRawMany();
+
+    return Promise.all(
+      rows.map(async (row) => {
+        const last = await this.smsRepo.findOne({
+          where: { phoneNumber: row.phoneNumber },
+          order: { createdAt: 'DESC' },
+        });
+        return {
+          phoneNumber: row.phoneNumber,
+          lastMessage: last?.body ?? '',
+          lastAt: new Date(row.lastAt),
+          direction: last?.direction ?? SmsDirection.OUTBOUND,
+          total: Number(row.total),
+        };
+      }),
+    );
+  }
+
+  /** Full message history with one contact, oldest first (chat order). */
+  async thread(user: User, phoneNumber: string): Promise<SmsLog[]> {
+    this.assertSmsAccess(user);
+    return this.smsRepo.find({
+      where: { phoneNumber },
+      order: { createdAt: 'ASC' },
+      take: 500,
+    });
+  }
+
+  /** SMS runs on the USA (Telnyx) line, so USA access is what grants it. */
+  private canSendSms(user: User): boolean {
+    if (user.role === Role.ADMIN) return true;
+    if (user.regions?.includes(Region.USA)) return true;
+    return user.provider === CallingProvider.TELNYX;
+  }
+
+  private assertSmsAccess(user: User): void {
+    if (!this.canSendSms(user)) {
+      throw new BadRequestException(
+        'SMS is only available to users with USA calling access. Ask an admin to enable it.',
+      );
+    }
   }
 }

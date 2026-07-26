@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'dialer_screen.dart';
+import 'messages_screen.dart';
 import 'history_screen.dart';
 import 'profile_screen.dart';
 
@@ -19,13 +20,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [DialerScreen(), HistoryScreen(), ProfileScreen()],
+        children: const [DialerScreen(), MessagesScreen(), HistoryScreen(), ProfileScreen()],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dialpad), label: 'Dialer'),
+          NavigationDestination(icon: Icon(Icons.forum_outlined), label: 'Messages'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
         ],

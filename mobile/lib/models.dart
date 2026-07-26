@@ -108,3 +108,53 @@ class CallLogItem {
                 : null),
       );
 }
+
+/// One SMS conversation with a contact (shared USA number inbox).
+class SmsThread {
+  SmsThread({
+    required this.phoneNumber,
+    required this.lastMessage,
+    required this.lastAt,
+    required this.direction,
+    required this.total,
+  });
+
+  final String phoneNumber;
+  final String lastMessage;
+  final DateTime lastAt;
+  final String direction;
+  final int total;
+
+  factory SmsThread.fromJson(Map<String, dynamic> json) => SmsThread(
+        phoneNumber: json['phoneNumber'] as String,
+        lastMessage: json['lastMessage'] as String? ?? '',
+        lastAt: DateTime.parse(json['lastAt'] as String).toLocal(),
+        direction: json['direction'] as String? ?? 'outbound',
+        total: (json['total'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// A single SMS in a conversation.
+class SmsMessage {
+  SmsMessage({
+    required this.id,
+    required this.body,
+    required this.direction,
+    required this.status,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String body;
+  final String direction;
+  final String status;
+  final DateTime createdAt;
+
+  factory SmsMessage.fromJson(Map<String, dynamic> json) => SmsMessage(
+        id: json['id'] as String,
+        body: json['body'] as String? ?? '',
+        direction: json['direction'] as String? ?? 'outbound',
+        status: json['status'] as String? ?? 'sent',
+        createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
+      );
+}

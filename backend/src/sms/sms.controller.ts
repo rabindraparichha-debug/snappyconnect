@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -25,6 +25,18 @@ export class SmsController {
   @Post('send')
   send(@CurrentUser() user: User, @Body() dto: SendSmsDto) {
     return this.smsService.send(user, dto);
+  }
+
+  /** Conversation list for the shared number — one entry per contact. */
+  @Get('threads')
+  threads(@CurrentUser() user: User) {
+    return this.smsService.threads(user);
+  }
+
+  /** Full message history with one contact. */
+  @Get('threads/:phoneNumber')
+  thread(@CurrentUser() user: User, @Param('phoneNumber') phoneNumber: string) {
+    return this.smsService.thread(user, phoneNumber);
   }
 
   @Get()
