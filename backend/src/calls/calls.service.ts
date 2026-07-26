@@ -17,6 +17,7 @@ import {
   Role,
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
+import { DncService } from '../dnc/dnc.service';
 import { ActivityService } from '../activity/activity.service';
 import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -46,6 +47,7 @@ export class CallsService {
     private readonly notificationsService: NotificationsService,
     private readonly activityService: ActivityService,
     private readonly webhooksService: WebhooksService,
+    private readonly dncService: DncService,
   ) {}
 
   // ---------- Initiation ----------
@@ -57,6 +59,11 @@ export class CallsService {
     region?: Region,
   ): Promise<InitiateCallResult> {
     const number = phoneNumber.trim();
+    if (this.dncService.isBlocked(number)) {
+      throw new ForbiddenException(
+        `${number} is on the Do Not Call list and cannot be dialled.`,
+      );
+    }
     const provider = this.resolveProvider(user, number, region);
     const strategy = this.providersService.getStrategy(provider);
     return strategy.initiateCall({ user, phoneNumber: number, source });

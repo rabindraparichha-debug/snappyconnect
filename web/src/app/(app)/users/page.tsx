@@ -20,6 +20,8 @@ interface UserForm {
   sipUsername: string;
   sipPassword: string;
   regions: Region[];
+  dailyCallTarget: string;
+  weeklyCallTarget: string;
 }
 
 const EMPTY_FORM: UserForm = {
@@ -36,6 +38,8 @@ const EMPTY_FORM: UserForm = {
   sipUsername: '',
   sipPassword: '',
   regions: [],
+  dailyCallTarget: '',
+  weeklyCallTarget: '',
 };
 
 export default function UsersPage() {
@@ -99,6 +103,8 @@ export default function UsersPage() {
       sipUsername: user.providerConfig?.sipUsername ?? '',
       sipPassword: user.providerConfig?.sipPassword ?? '',
       regions: user.regions ?? [],
+      dailyCallTarget: user.dailyCallTarget ? String(user.dailyCallTarget) : '',
+      weeklyCallTarget: user.weeklyCallTarget ? String(user.weeklyCallTarget) : '',
     });
     setFormError(null);
     setModalOpen(true);
@@ -138,6 +144,8 @@ export default function UsersPage() {
       provider: form.provider || undefined,
       regions: form.regions,
       providerConfig: Object.keys(providerConfig).length ? providerConfig : undefined,
+      dailyCallTarget: Number(form.dailyCallTarget) || 0,
+      weeklyCallTarget: Number(form.weeklyCallTarget) || 0,
     };
     if (form.password) body.password = form.password;
 
@@ -527,6 +535,27 @@ export default function UsersPage() {
               </div>
             </>
           )}
+
+          <div>
+            <Label>Daily Call Target</Label>
+            <Input
+              type="number"
+              min={0}
+              placeholder="0 for no target"
+              value={form.dailyCallTarget}
+              onChange={(e) => setForm({ ...form, dailyCallTarget: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Weekly Call Target</Label>
+            <Input
+              type="number"
+              min={0}
+              placeholder="0 for no target"
+              value={form.weeklyCallTarget}
+              onChange={(e) => setForm({ ...form, weeklyCallTarget: e.target.value })}
+            />
+          </div>
 
           {formError && (
             <p className="col-span-full rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">

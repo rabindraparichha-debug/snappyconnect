@@ -110,6 +110,25 @@ export default function DashboardPage() {
             <MiniCard label="This Month" value={recruiter.callsThisMonth} />
             <MiniCard label="Avg/Hour" value={recruiter.avgCallsPerHour} />
           </div>
+
+          {(recruiter.dailyCallTarget > 0 || recruiter.weeklyCallTarget > 0) && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {recruiter.dailyCallTarget > 0 && (
+                <TargetCard
+                  label="Daily Target"
+                  actual={recruiter.callsToday}
+                  target={recruiter.dailyCallTarget}
+                />
+              )}
+              {recruiter.weeklyCallTarget > 0 && (
+                <TargetCard
+                  label="Weekly Target"
+                  actual={recruiter.callsThisWeek}
+                  target={recruiter.weeklyCallTarget}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -350,6 +369,30 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
       <p className="text-xs font-medium uppercase tracking-wide opacity-70">{label}</p>
       <p className="mt-1 text-xl font-bold">{value}</p>
     </div>
+  );
+}
+
+function TargetCard({ label, actual, target }: { label: string; actual: number; target: number }) {
+  const pct = Math.min(100, Math.round((actual / target) * 100));
+  const met = actual >= target;
+  return (
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+        <p className={`text-sm font-bold ${met ? 'text-emerald-600' : 'text-slate-900'}`}>
+          {actual} / {target}
+        </p>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${met ? 'bg-emerald-500' : 'bg-brand-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-xs text-slate-400">
+        {met ? 'Target met' : `${target - actual} to go`}
+      </p>
+    </Card>
   );
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button, Card, Input, Label, Spinner } from '@/components/ui';
 
@@ -163,9 +163,143 @@ export default function SettingsPage() {
           ))}
           <CallScriptsSection />
           <WebhooksSection />
+          <DncSection />
         </div>
       )}
     </div>
+  );
+}
+
+interface DncEntry {
+  id: string;
+  phoneNumber: string;
+  reason: string | null;
+  createdAt: string;
+  addedBy?: { name: string } | null;
+}
+
+function DncSection() {
+  const [entries, setEntries] = useState<DncEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState({ phoneNumber: '', reason: '' });
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(async (q?: string) => {
+    try {
+      setEntries(await api<DncEntry[]>('/dnc', { query: q ? { q } : undefined }));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load the Do Not Call list');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add() {
+    if (!draft.phoneNumber.trim()) return;
+    setAdding(true);
+    try {
+      await api('/dnc', {
+        method: 'POST',
+        body: { phoneNumber: draft.phoneNumber.trim(), reason: draft.reason.trim() || undefined },
+      });
+      setDraft({ phoneNumber: '', reason: '' });
+      await load(query);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function remove(entry: DncEntry) {
+    try {
+      await api(`/dnc/${entry.id}`, { method: 'DELETE' });
+      await load(query);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove');
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-base font-semibold text-slate-900">Do Not Call List</h2>
+      <p className="mt-0.5 text-sm text-slate-500">
+        Numbers here are blocked at dial time and flagged when importing contacts.
+      </p>
+
+      {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+
+      <div className="mt-4 flex flex-wrap items-end gap-2">
+        <div className="min-w-[10rem] flex-1">
+          <Label>Phone Number</Label>
+          <Input
+            value={draft.phoneNumber}
+            onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })}
+            placeholder="+1 555 000 1234"
+          />
+        </div>
+        <div className="min-w-[10rem] flex-1">
+          <Label>Reason</Label>
+          <Input
+            value={draft.reason}
+            onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+            placeholder="Optional"
+          />
+        </div>
+        <Button onClick={add} disabled={adding || !draft.phoneNumber.trim()}>
+          {adding ? 'Adding…' : 'Block'}
+        </Button>
+      </div>
+
+      <div className="mt-4">
+        <Input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            load(e.target.value);
+          }}
+          placeholder="Search blocked numbers…"
+        />
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Spinner className="h-6 w-6" /></div>
+      ) : entries.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-400">
+          {query ? 'No matches.' : 'No numbers blocked.'}
+        </p>
+      ) : (
+        <div className="mt-3 max-h-72 divide-y divide-slate-100 overflow-y-auto">
+          {entries.map((e) => (
+            <div key={e.id} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-900">{e.phoneNumber}</p>
+                <p className="truncate text-xs text-slate-500">
+                  {e.reason || 'No reason given'}
+                  {e.addedBy ? ` · added by ${e.addedBy.name}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => remove(e)}
+                title="Remove from list"
+                className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path fillRule="evenodd" d="M8.75 1a1 1 0 0 0-.95.68L7.42 3H4a1 1 0 0 0 0 2h12a1 1 0 1 0 0-2h-3.42l-.38-1.32A1 1 0 0 0 11.25 1h-2.5ZM5 6.5h10l-.7 10.1a1.5 1.5 0 0 1-1.5 1.4H7.2a1.5 1.5 0 0 1-1.5-1.4L5 6.5Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 

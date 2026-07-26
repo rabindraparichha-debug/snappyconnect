@@ -25,6 +25,8 @@ export interface User {
   regions: Region[];
   providerConfig: Record<string, any>;
   status: UserStatus;
+  dailyCallTarget: number;
+  weeklyCallTarget: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,6 +207,8 @@ export interface RecruiterStats {
   callsThisMonth: number;
   avgCallsPerHour: number;
   productivityScore: number;
+  dailyCallTarget: number;
+  weeklyCallTarget: number;
 }
 
 export interface TrendPoint {

@@ -102,6 +102,22 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     setMessage('');
     setElapsed(0);
 
+    // Telnyx calls are placed in-browser and never hit the server-side guard,
+    // so the suppression list is checked here for every route.
+    try {
+      const { blocked } = await api<{ blocked: boolean }>('/dnc/check', {
+        query: { phoneNumber: target },
+      });
+      if (blocked) {
+        setState('error');
+        setMessage('This number is on the Do Not Call list.');
+        return;
+      }
+    } catch {
+      // A failed check shouldn't strand the recruiter; `initiate` still guards
+      // the server-side routes.
+    }
+
     if (shouldUseTelnyx(target)) {
       await placeTelnyxCall(target);
     } else {

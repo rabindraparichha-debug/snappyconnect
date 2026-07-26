@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api, API_URL, getToken } from '@/lib/api';
 import type { CallDisposition, CallLog, Paginated } from '@/lib/types';
 import { DISPOSITION_COLORS, DISPOSITION_LABELS, PROVIDER_LABELS } from '@/lib/types';
 import { formatDateTime, formatDuration } from '@/lib/format';
-import { Badge, Button, Card, EmptyState, Input, Select, Spinner } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Input, Modal, Select, Spinner } from '@/components/ui';
 
 const LIMIT = 20;
 
@@ -21,6 +22,7 @@ const QUICK_NOTES = [
 ];
 
 export default function HistoryPage() {
+  const router = useRouter();
   const [data, setData] = useState<Paginated<CallLog> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,13 @@ export default function HistoryPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
+
+  // Quick actions from a row: call back, or text the same number.
+  const [messageTo, setMessageTo] = useState<string | null>(null);
+  const [messageBody, setMessageBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageSent, setMessageSent] = useState(false);
 
   // Bulk selection
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -122,6 +131,33 @@ export default function HistoryPage() {
       setError(err instanceof Error ? err.message : 'Bulk update failed');
     } finally {
       setBulkSaving(false);
+    }
+  }
+
+  /** Redial a number from history using the normal dialer flow. */
+  function callBack(phoneNumber: string) {
+    router.push(`/dial?number=${encodeURIComponent(phoneNumber)}`);
+  }
+
+  function openMessage(phoneNumber: string) {
+    setMessageTo(phoneNumber);
+    setMessageBody('');
+    setMessageError(null);
+    setMessageSent(false);
+  }
+
+  async function sendMessage() {
+    if (!messageTo || !messageBody.trim()) return;
+    setSending(true);
+    setMessageError(null);
+    try {
+      await api('/sms/send', { method: 'POST', body: { to: messageTo, body: messageBody.trim() } });
+      setMessageSent(true);
+      setMessageBody('');
+    } catch (err) {
+      setMessageError(err instanceof Error ? err.message : 'Could not send the message');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -295,6 +331,7 @@ export default function HistoryPage() {
                   <Th>Duration</Th>
                   <Th>Status</Th>
                   <Th></Th>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -351,6 +388,28 @@ export default function HistoryPage() {
                         {call.recordingUrl && <Pill>Rec</Pill>}
                       </div>
                     </Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-1">
+                        <button
+                          title={`Call ${call.phoneNumber}`}
+                          onClick={() => callBack(call.phoneNumber)}
+                          className="rounded-md p-1.5 text-emerald-600 transition-colors hover:bg-emerald-50"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                          </svg>
+                        </button>
+                        <button
+                          title={`Message ${call.phoneNumber}`}
+                          onClick={() => openMessage(call.phoneNumber)}
+                          className="rounded-md p-1.5 text-brand-600 transition-colors hover:bg-brand-50"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                          </svg>
+                        </button>
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -396,6 +455,50 @@ export default function HistoryPage() {
           }}
         />
       )}
+
+      <Modal
+        open={messageTo !== null}
+        title={`Message ${messageTo ?? ''}`}
+        onClose={() => setMessageTo(null)}
+      >
+        <div className="col-span-full">
+          {messageSent ? (
+            <div className="rounded-lg bg-emerald-50 px-3 py-6 text-center">
+              <p className="text-sm font-medium text-emerald-800">Message sent</p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Replies appear in Messages and notify the team.
+              </p>
+              <Button variant="secondary" className="mt-4" onClick={() => setMessageTo(null)}>
+                Close
+              </Button>
+            </div>
+          ) : (
+            <>
+              <textarea
+                autoFocus
+                rows={4}
+                maxLength={1600}
+                value={messageBody}
+                onChange={(e) => setMessageBody(e.target.value)}
+                placeholder="Type your message…"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <span className="text-xs text-slate-400">{messageBody.length}/1600</span>
+                {messageError && <span className="text-xs text-rose-600">{messageError}</span>}
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setMessageTo(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={sendMessage} disabled={sending || !messageBody.trim()}>
+                  {sending ? 'Sending…' : 'Send SMS'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -415,6 +518,9 @@ function CallDetailDrawer({
   const [callDisposition, setCallDisposition] = useState(call.disposition ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [blockError, setBlockError] = useState<string | null>(null);
 
   async function save() {
     setSaving(true);
@@ -544,6 +650,34 @@ function CallDetailDrawer({
             </div>
           </div>
 
+          <div className="border-t border-slate-200 pt-4">
+            <p className="mb-1 text-xs font-medium text-slate-500">Do Not Call</p>
+            <p className="mb-2 text-xs text-slate-400">
+              Blocks {call.phoneNumber} from being dialled again.
+            </p>
+            <Button
+              variant="secondary"
+              disabled={blocking || blocked}
+              onClick={async () => {
+                setBlocking(true);
+                try {
+                  await api('/dnc', {
+                    method: 'POST',
+                    body: { phoneNumber: call.phoneNumber, reason: 'Added from call history' },
+                  });
+                  setBlocked(true);
+                } catch (err) {
+                  setBlockError(err instanceof Error ? err.message : 'Could not block this number');
+                } finally {
+                  setBlocking(false);
+                }
+              }}
+            >
+              {blocked ? 'On Do Not Call list' : blocking ? 'Blocking…' : 'Add to Do Not Call'}
+            </Button>
+            {blockError && <p className="mt-2 text-xs text-rose-600">{blockError}</p>}
+          </div>
+
           {call.aiSummary && (
             <div className="border-t border-slate-200 pt-4">
               <p className="mb-1 text-xs font-medium text-slate-500">AI Summary</p>
@@ -580,6 +714,18 @@ function Th({ children }: { children?: React.ReactNode }) {
     </th>
   );
 }
-function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-4 py-3 text-slate-600 ${className ?? ''}`}>{children}</td>;
+function Td({
+  children,
+  className,
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
+}) {
+  return (
+    <td className={`px-4 py-3 text-slate-600 ${className ?? ''}`} onClick={onClick}>
+      {children}
+    </td>
+  );
 }

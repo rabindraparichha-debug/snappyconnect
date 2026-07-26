@@ -78,6 +78,8 @@ export class AnalyticsService {
       callsThisMonth: monthCalls,
       avgCallsPerHour,
       productivityScore,
+      dailyCallTarget: user.dailyCallTarget ?? 0,
+      weeklyCallTarget: user.weeklyCallTarget ?? 0,
     };
   }
 

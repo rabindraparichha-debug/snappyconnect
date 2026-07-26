@@ -7,8 +7,15 @@ body {
   height: 100%;
 }
 
+/*
+ * Written as literals rather than `@apply`: the dark theme below redefines the
+ * slate utilities, which makes Tailwind treat an `@apply` of them as circular.
+ */
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  background-color: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /*

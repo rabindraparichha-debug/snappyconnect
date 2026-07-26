@@ -52,6 +52,14 @@ export class User {
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.ACTIVE })
   status: UserStatus;
 
+  /** Calls this recruiter is expected to make each day; 0 means no target. */
+  @Column({ type: 'int', default: 0 })
+  dailyCallTarget: number;
+
+  /** Calls expected per week; 0 means no target. */
+  @Column({ type: 'int', default: 0 })
+  weeklyCallTarget: number;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

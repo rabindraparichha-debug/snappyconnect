@@ -2,10 +2,12 @@ import {
   IsArray,
   IsEmail,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
+  Min,
   MinLength,
 } from 'class-validator';
 import { CallingProvider, Region, Role, UserStatus } from '../../common/enums';
@@ -50,4 +52,14 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(UserStatus)
   status?: UserStatus;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dailyCallTarget?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  weeklyCallTarget?: number;
 }

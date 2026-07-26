@@ -20,6 +20,8 @@ import { ActivityModule } from './activity/activity.module';
 import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { ContactListsModule } from './contact-lists/contact-lists.module';
+import { DncModule } from './dnc/dnc.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -52,6 +54,8 @@ import { UsersModule } from './users/users.module';
     ScheduledCallsModule,
     ScriptsModule,
     WebhooksModule,
+    ContactListsModule,
+    DncModule,
     SeedModule,
   ],
   controllers: [AppController],
