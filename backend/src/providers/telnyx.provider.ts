@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CallingProvider } from '../common/enums';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
@@ -23,6 +25,8 @@ export class TelnyxProvider implements CallingProviderStrategy {
 
   constructor(
     private readonly settings: SettingsService,
+    @InjectRepository(User)
+    private readonly usersRepo: Repository<User>,
     config: ConfigService,
   ) {
     this.webAppUrl = config.get<string>('WEB_APP_URL', 'http://localhost:3000');
@@ -46,12 +50,40 @@ export class TelnyxProvider implements CallingProviderStrategy {
     if (!cfg.apiKey) {
       throw new BadRequestException('Telnyx is not configured. Ask an admin to add credentials in Settings.');
     }
-    const credentialId: string | undefined =
+    let credentialId: string | undefined =
       user.providerConfig?.telnyxCredentialId || cfg.credentialId;
     if (!credentialId) {
-      throw new BadRequestException(
-        'No Telnyx telephony credential assigned to this user or configured globally.',
-      );
+      // On-demand: create a per-user telephony credential on the configured
+      // SIP connection and remember it on the user for reuse.
+      if (!cfg.connectionId) {
+        throw new BadRequestException(
+          'No Telnyx telephony credential or Connection ID configured. Ask an admin to set the Connection ID in Settings.',
+        );
+      }
+      const created = await fetch(`${TELNYX_API}/telephony_credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connection_id: String(cfg.connectionId),
+          name: `snappyconnect-${user.email}`,
+        }),
+      });
+      if (!created.ok) {
+        const body = await created.text();
+        throw new BadRequestException(
+          `Telnyx credential creation failed (${created.status}): ${body}`,
+        );
+      }
+      const data: any = await created.json();
+      credentialId = data?.data?.id;
+      if (!credentialId) {
+        throw new BadRequestException('Telnyx returned no credential id.');
+      }
+      user.providerConfig = { ...(user.providerConfig ?? {}), telnyxCredentialId: credentialId };
+      await this.usersRepo.save(user);
     }
 
     const res = await fetch(`${TELNYX_API}/telephony_credentials/${credentialId}/token`, {
