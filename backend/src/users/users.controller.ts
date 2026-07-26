@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Ip,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -11,8 +12,12 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { AuditAction } from '../audit/audit-log.entity';
+import { AuditService } from '../audit/audit.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role, UserStatus } from '../common/enums';
+import { User } from './user.entity';
 import { AssignProviderDto } from './dto/assign-provider.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -45,6 +50,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly provisioning: TelnyxProvisioningService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Numbers on the Telnyx account not yet tied to a recruiter. */
@@ -54,8 +60,15 @@ export class UsersController {
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  async create(@CurrentUser() actor: User, @Ip() ip: string, @Body() dto: CreateUserDto) {
+    const created = await this.usersService.create(dto);
+    await this.audit.record(
+      actor,
+      AuditAction.USER_CREATED,
+      `Created ${dto.role ?? 'user'} account for ${created.email}`,
+      { targetId: created.id, targetLabel: created.email, ipAddress: ip },
+    );
+    return created;
   }
 
   @Get()
@@ -69,19 +82,63 @@ export class UsersController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  async update(
+    @CurrentUser() actor: User,
+    @Ip() ip: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    const before = await this.usersService.findById(id);
+    const updated = await this.usersService.update(id, dto);
+    const changes = AuditService.describeChanges(
+      before,
+      updated,
+      ['name', 'email', 'role', 'provider', 'regions', 'status', 'dailyCallTarget', 'weeklyCallTarget'],
+    );
+    // `password` never reaches describeChanges, so a hash can't leak into the trail.
+    const summary = dto.password
+      ? `Updated ${before.email} (${changes}); password reset by admin`
+      : `Updated ${before.email} (${changes})`;
+    await this.audit.record(actor, AuditAction.USER_UPDATED, summary, {
+      targetId: id,
+      targetLabel: before.email,
+      ipAddress: ip,
+    });
+    return updated;
   }
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
+  async remove(
+    @CurrentUser() actor: User,
+    @Ip() ip: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const target = await this.usersService.findById(id);
     await this.usersService.remove(id);
+    await this.audit.record(
+      actor,
+      AuditAction.USER_DELETED,
+      `Deleted ${target.role} account ${target.email}`,
+      { targetId: id, targetLabel: target.email, ipAddress: ip },
+    );
   }
 
   @Patch(':id/status')
-  setStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetStatusDto) {
-    return this.usersService.setStatus(id, dto.status);
+  async setStatus(
+    @CurrentUser() actor: User,
+    @Ip() ip: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetStatusDto,
+  ) {
+    const updated = await this.usersService.setStatus(id, dto.status);
+    await this.audit.record(
+      actor,
+      AuditAction.USER_STATUS_CHANGED,
+      `Set ${updated.email} to ${dto.status}`,
+      { targetId: id, targetLabel: updated.email, ipAddress: ip },
+    );
+    return updated;
   }
 
   @Patch(':id/provider')

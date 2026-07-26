@@ -1,6 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Ip, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { AuditAction } from '../audit/audit-log.entity';
+import { AuditService } from '../audit/audit.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums';
@@ -21,7 +23,10 @@ class AddDncDto {
 @ApiBearerAuth()
 @Controller('dnc')
 export class DncController {
-  constructor(private readonly service: DncService) {}
+  constructor(
+    private readonly service: DncService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get()
   findAll(@Query('q') q?: string) {
@@ -43,9 +48,17 @@ export class DncController {
     return this.service.add(user, dto.phoneNumber, dto.reason);
   }
 
+  /** Un-blocking a number is the compliance-sensitive direction, so it is audited. */
   @Delete(':id')
   @Roles(Role.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  async remove(@CurrentUser() actor: User, @Ip() ip: string, @Param('id') id: string) {
+    const entry = await this.service.findOne(id);
+    await this.service.remove(id);
+    await this.audit.record(
+      actor,
+      AuditAction.DNC_REMOVED,
+      `Removed ${entry.phoneNumber} from the Do Not Call list`,
+      { targetId: id, targetLabel: entry.phoneNumber, ipAddress: ip },
+    );
   }
 }

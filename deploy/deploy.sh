@@ -37,9 +37,10 @@ rsync -az --delete -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking
   --exclude .env.local --exclude tsconfig.tsbuildinfo \
   "$REPO_ROOT/backend" "$REPO_ROOT/web" root@$VPS_IP:/opt/snappyconnect/
 
-echo "==> 2/4 Uploading setup script"
+echo "==> 2/4 Uploading setup and maintenance scripts"
 rsync -az -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
-  "$REPO_ROOT/deploy/vps-setup.sh" root@$VPS_IP:/opt/snappyconnect/vps-setup.sh
+  "$REPO_ROOT/deploy/vps-setup.sh" "$REPO_ROOT/deploy/backup.sh" "$REPO_ROOT/deploy/restore.sh" \
+  root@$VPS_IP:/opt/snappyconnect/
 
 echo "==> 3/4 Running server setup (install deps, build, restart services)"
 $SSH "VPS_IP=$VPS_IP DOMAIN=$DOMAIN WEB_PORT=$WEB_PORT DB_PASSWORD=$DB_PASSWORD JWT_SECRET=$JWT_SECRET \

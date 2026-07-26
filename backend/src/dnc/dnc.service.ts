@@ -49,9 +49,14 @@ export class DncService implements OnModuleInit {
     return entry;
   }
 
-  async remove(id: string): Promise<void> {
+  async findOne(id: string): Promise<DncEntry> {
     const entry = await this.repo.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Entry not found');
+    return entry;
+  }
+
+  async remove(id: string): Promise<void> {
+    const entry = await this.findOne(id);
     await this.repo.remove(entry);
     this.blocked.delete(entry.phoneNumber);
   }

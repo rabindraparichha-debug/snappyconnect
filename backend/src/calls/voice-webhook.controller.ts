@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, Logger, Post } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Public } from '../common/decorators/public.decorator';
@@ -13,6 +14,7 @@ import { User } from '../users/user.entity';
  * Configure this URL on the Telnyx Voice API application:
  *   https://<host>/api/v1/webhooks/telnyx-voice
  */
+@SkipThrottle()
 @Controller('webhooks')
 export class VoiceWebhookController {
   private readonly logger = new Logger(VoiceWebhookController.name);

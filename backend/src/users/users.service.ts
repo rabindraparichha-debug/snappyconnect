@@ -129,6 +129,10 @@ export class UsersService {
     const ok = await bcrypt.compare(currentPassword, user.passwordHash ?? '');
     if (!ok) throw new BadRequestException('Current password is incorrect');
 
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('The new password must differ from the current one');
+    }
+
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     await this.usersRepo.save(user);
   }

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AiModule } from './ai/ai.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -20,6 +21,7 @@ import { ActivityModule } from './activity/activity.module';
 import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { AuditModule } from './audit/audit.module';
 import { ContactListsModule } from './contact-lists/contact-lists.module';
 import { DncModule } from './dnc/dnc.module';
 import { UsersModule } from './users/users.module';
@@ -27,6 +29,9 @@ import { UsersModule } from './users/users.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Blanket limit for the API. Individual routes tighten this with
+    // @Throttle (login) or opt out with @SkipThrottle (provider webhooks).
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -54,12 +59,14 @@ import { UsersModule } from './users/users.module';
     ScheduledCallsModule,
     ScriptsModule,
     WebhooksModule,
+    AuditModule,
     ContactListsModule,
     DncModule,
     SeedModule,
   ],
   controllers: [AppController],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

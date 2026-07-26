@@ -102,8 +102,36 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 EOF
 
+echo "--- nightly database backup"
+install -m 755 "$APP_DIR/backup.sh" /usr/local/bin/snappyconnect-backup
+install -m 755 "$APP_DIR/restore.sh" /usr/local/bin/snappyconnect-restore
+
+cat > /etc/systemd/system/snappyconnect-backup.service << 'EOF'
+[Unit]
+Description=SnappyConnect database backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/snappyconnect-backup
+EOF
+
+cat > /etc/systemd/system/snappyconnect-backup.timer << 'EOF'
+[Unit]
+Description=Nightly SnappyConnect database backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+# Catch up if the box was powered off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable snappyconnect-api snappyconnect-web
+systemctl enable --now snappyconnect-backup.timer
 systemctl restart snappyconnect-api snappyconnect-web
 
 echo "--- firewall (only touched if ufw is active; CloudPanel rules untouched)"

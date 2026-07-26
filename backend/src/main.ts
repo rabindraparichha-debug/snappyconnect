@@ -1,10 +1,16 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // CloudPanel's nginx sits in front of us, so without this every request
+  // reports the proxy's IP — rate limits would then be shared by all users
+  // and one person could lock out the whole team.
+  app.set('trust proxy', 1);
 
   app.setGlobalPrefix('api/v1');
   app.enableCors({ origin: true });
