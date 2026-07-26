@@ -7,6 +7,7 @@ import { clearSession, getStoredUser, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { Logo } from '@/components/Logo';
 import { DialerPanel } from '@/components/DialerPanel';
+import { TelnyxIncoming } from '@/components/TelnyxIncoming';
 import { cn } from '@/components/ui';
 
 const NAV = [
@@ -102,6 +103,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
+
+      {/* Incoming Telnyx calls (USA users) ring on any page */}
+      <TelnyxIncoming user={user} />
 
       {/* Floating dialer */}
       {dialerOpen && (

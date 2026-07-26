@@ -124,17 +124,24 @@ export default function SettingsPage() {
         leave them unchanged to keep the stored value.
       </p>
 
-      {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {error && (
+        <div className="mt-6 rounded-lg bg-rose-50 px-4 py-8 text-center">
+          <p className="text-sm font-medium text-rose-700">{error}</p>
+          <p className="mt-1 text-xs text-rose-500">Only administrators can manage provider settings.</p>
+        </div>
+      )}
 
-      <div className="mt-6 space-y-6">
-        {SECTIONS.map((section) => (
-          <SettingsSection
-            key={section.key}
-            section={section}
-            initial={settings[section.key] ?? {}}
-          />
-        ))}
-      </div>
+      {!error && (
+        <div className="mt-6 space-y-6">
+          {SECTIONS.map((section) => (
+            <SettingsSection
+              key={section.key}
+              section={section}
+              initial={settings[section.key] ?? {}}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

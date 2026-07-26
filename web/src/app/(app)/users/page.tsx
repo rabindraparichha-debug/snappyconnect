@@ -202,9 +202,14 @@ export default function UsersPage() {
         </div>
       </Card>
 
-      {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {error && (
+        <div className="mt-4 rounded-lg bg-rose-50 px-4 py-8 text-center">
+          <p className="text-sm font-medium text-rose-700">{error}</p>
+          <p className="mt-1 text-xs text-rose-500">Only administrators can manage users.</p>
+        </div>
+      )}
 
-      <Card className="mt-4 overflow-hidden">
+      {!error && <Card className="mt-4 overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-16">
             <Spinner className="h-7 w-7" />
@@ -285,7 +290,7 @@ export default function UsersPage() {
             </table>
           </div>
         )}
-      </Card>
+      </Card>}
 
       {/* Add / Edit modal */}
       <Modal

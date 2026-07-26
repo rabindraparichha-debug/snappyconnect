@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
+import { getFromNumber, getTelnyxClient } from '@/lib/telnyx-client';
 import type { InitiateCallResult } from '@/lib/types';
 import { Button, Input, cn } from '@/components/ui';
 
@@ -32,6 +33,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const callRef = useRef<any>(null);
   const answeredAtRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
+  const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,13 +45,21 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      detachHandler();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function detachHandler() {
+    if (clientRef.current && handlerRef.current) {
       try {
-        clientRef.current?.disconnect();
+        clientRef.current.off('telnyx.notification', handlerRef.current);
       } catch {
         /* noop */
       }
-    };
-  }, []);
+    }
+    handlerRef.current = null;
+  }
 
   function startTimer() {
     answeredAtRef.current = Date.now();
@@ -98,38 +108,37 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
 
   async function placeTelnyxCall(target: string) {
     setState('connecting');
-    setMessage('Connecting to Telnyx…');
+    setMessage('Requesting microphone access…');
     dialStartedAtRef.current = new Date().toISOString();
     try {
-      const { token, fromNumber } = await api<{ token: string; fromNumber?: string }>(
-        '/calls/telnyx/token',
-        { method: 'POST' },
-      );
-      const { TelnyxRTC } = await import('@telnyx/webrtc');
-      finishedRef.current = false;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        // mic prompt may fail in some browsers; Telnyx SDK will retry internally
+      }
 
-      const client: any = new TelnyxRTC({ login_token: token });
+      setMessage('Connecting to Telnyx…');
+      const client = await getTelnyxClient();
+      finishedRef.current = false;
       clientRef.current = client;
       if (audioRef.current) client.remoteElement = audioRef.current;
 
-      client.on('telnyx.ready', () => {
-        setMessage(`Dialing ${target}…`);
-        callRef.current = client.newCall({
-          destinationNumber: target,
-          callerNumber: fromNumber,
-          audio: true,
-          video: false,
-        });
+      setMessage(`Dialing ${target}…`);
+      callRef.current = client.newCall({
+        destinationNumber: target,
+        callerNumber: getFromNumber(),
+        audio: true,
+        video: false,
       });
+      const myCallId = callRef.current?.id;
 
-      client.on('telnyx.error', (err: any) => {
-        setState('error');
-        setMessage(err?.message ?? 'Telnyx connection error');
-      });
-
-      client.on('telnyx.notification', (notification: any) => {
+      const handler = (notification: any) => {
         if (notification.type !== 'callUpdate' || !notification.call) return;
         const call = notification.call;
+        // The shared client also carries other calls (e.g. incoming) — only
+        // react to the one this panel placed.
+        if (myCallId && call.id !== myCallId) return;
         callRef.current = call;
         switch (call.state) {
           case 'ringing':
@@ -151,9 +160,9 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           default:
             break;
         }
-      });
-
-      await client.connect();
+      };
+      handlerRef.current = handler;
+      client.on('telnyx.notification', handler);
     } catch (err) {
       setState('error');
       setMessage(err instanceof Error ? err.message : 'Could not start the call');
@@ -194,11 +203,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     }
 
     answeredAtRef.current = null;
-    try {
-      clientRef.current?.disconnect();
-    } catch {
-      /* noop */
-    }
+    detachHandler();
     clientRef.current = null;
   }
 
@@ -283,7 +288,13 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
         )}
       </div>
 
-      {user?.provider && (
+      {(user?.regions?.length ?? 0) > 0 ? (
+        <p className="mt-3 text-center text-xs text-slate-400">
+          {user!.regions.map(r => r.toUpperCase()).join(' · ')} — +1 dials in-browser
+          {user!.regions.includes('uae') ? ', UAE rings your SIP line' : ''}
+          {user!.regions.includes('india') ? ', India queues to mobile' : ''}
+        </p>
+      ) : user?.provider ? (
         <p className="mt-3 text-center text-xs text-slate-400">
           Calling via{' '}
           {user.provider === 'telnyx'
@@ -294,14 +305,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
                 ? 'the SnappyConnect mobile app (in-app SIP dialer)'
                 : 'your mobile phone (native dialer)'}
         </p>
-      )}
-      {!user?.provider && (user?.regions?.length ?? 0) > 0 && (
-        <p className="mt-3 text-center text-xs text-slate-400">
-          Regions: {user!.regions.join(', ').toUpperCase()} — USA numbers dial in-browser via
-          Telnyx.
-        </p>
-      )}
-      {!user?.provider && (user?.regions?.length ?? 0) === 0 && (
+      ) : (
         <p className="mt-3 text-center text-xs text-amber-600">
           No calling provider assigned — ask your administrator.
         </p>
