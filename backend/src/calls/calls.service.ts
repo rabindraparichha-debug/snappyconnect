@@ -89,6 +89,11 @@ export class CallsService {
     const guessed = guessRegion(phoneNumber);
     if (guessed && allowed.includes(guessed)) return REGION_PROVIDER[guessed];
 
+    // Everything else — an unrecognised country, or one this user has no
+    // direct path for — goes out over the UAE trunk, the only carrier route
+    // licensed for international dialling.
+    if (allowed.includes(Region.UAE)) return CallingProvider.ASTERISK;
+
     // Single-region users keep working without ever passing a region.
     if (allowed.length === 1) return REGION_PROVIDER[allowed[0]];
     return user.provider;

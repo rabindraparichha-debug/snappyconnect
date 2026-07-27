@@ -94,9 +94,27 @@ export async function getSipClient(): Promise<SipSession> {
 }
 
 /**
- * Place an outbound call. The destination is passed through exactly as the
- * recruiter typed it — the Asterisk dialplan does the UAE normalisation, and
- * the mobile app relies on the same behaviour.
+ * Format a destination for the UAE trunk.
+ *
+ * Asterisk rewrites the +971/00971/971 forms to local `0XXXXXXXXX` and routes
+ * anything starting with `0` out through the UCM. The Dinstar strips only its
+ * own `8N` SIM-port prefix, so the rest is dialled on the SIM verbatim —
+ * international destinations therefore need UAE's `00` access code, not a `+`.
+ *
+ * Mirrors toUaeTrunkFormat in the backend's region.util.
+ */
+export function toUaeTrunkFormat(phoneNumber: string): string {
+  const n = phoneNumber.replace(/[\s\-().]/g, '');
+  if (!n) return n;
+  if (n.startsWith('+971') || n.startsWith('00971') || /^971\d{8,}$/.test(n)) return n;
+  if (!n.startsWith('+') && !n.startsWith('00')) return n;
+  return n.startsWith('+') ? `00${n.slice(1)}` : n;
+}
+
+/**
+ * Place an outbound call. UAE and internal destinations go out as typed; only
+ * international numbers are rewritten, so the Asterisk dialplan keeps doing
+ * the UAE normalisation exactly as it does for the mobile client.
  */
 export async function placeSipCall(
   destination: string,
@@ -111,7 +129,8 @@ export async function placeSipCall(
   const { ua, config } = await getSipClient();
   const { Inviter, UserAgent, SessionState } = await import('sip.js');
 
-  const target = UserAgent.makeURI(`sip:${destination}@${config.sipDomain}`);
+  const dialled = toUaeTrunkFormat(destination);
+  const target = UserAgent.makeURI(`sip:${dialled}@${config.sipDomain}`);
   if (!target) throw new Error(`${destination} is not a number this line can dial.`);
 
   const inviter: any = new Inviter(ua, target, {

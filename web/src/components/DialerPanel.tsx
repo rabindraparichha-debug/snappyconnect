@@ -141,20 +141,19 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   }
 
   /**
-   * UAE numbers dial in-browser over SIP when the user has UAE access, so the
-   * call goes straight out instead of Asterisk ringing their line back first.
+   * The UAE trunk carries UAE numbers and every international destination —
+   * it is the only carrier path licensed for the latter. Calls dial in-browser
+   * over SIP rather than Asterisk ringing the recruiter's line back first.
+   *
+   * Telnyx is checked before this, so USA numbers never reach here. India keeps
+   * its native-dialer path for recruiters who have India access.
    */
   function shouldUseSip(target: string): boolean {
     const uaeAccess = user?.regions?.includes('uae') || user?.provider === 'asterisk';
     if (!uaeAccess) return false;
     const n = target.replace(/[\s\-().]/g, '');
-    // +971 / 00971 / 971 international forms, or the 0XXXXXXXXX local form.
-    return (
-      n.startsWith('+971') ||
-      n.startsWith('00971') ||
-      /^971\d{8,}$/.test(n) ||
-      /^0\d{8,9}$/.test(n)
-    );
+    if (user?.regions?.includes('india') && /^(\+91|0091|91)\d{10}$/.test(n)) return false;
+    return true;
   }
 
   async function placeUaeSipCall(target: string) {

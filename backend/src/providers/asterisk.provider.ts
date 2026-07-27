@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CallingProvider, CallSource } from '../common/enums';
+import { toUaeTrunkFormat } from '../common/region.util';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
 import { AsteriskAmiService } from './asterisk-ami.service';
@@ -50,7 +51,9 @@ export class AsteriskProvider implements CallingProviderStrategy {
       await this.ami.originate({
         channel: `PJSIP/${sipUsername}`,
         context: 'recruiters',
-        exten: input.phoneNumber,
+        // International destinations need UAE's 00 access code to match the
+        // dialplan and reach the SIM in dialable form.
+        exten: toUaeTrunkFormat(input.phoneNumber),
         callerId: `${input.user.name} <${sipUsername}>`,
         variables: { SNAPPY_USER_ID: input.user.id },
       });
