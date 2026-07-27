@@ -68,9 +68,17 @@ export class AsteriskProvider implements CallingProviderStrategy {
     };
   }
 
-  /** SIP connection details for the mobile app's built-in softphone. */
+  /**
+   * SIP connection details for the built-in softphones.
+   *
+   * `wssUrl` is what the mobile app uses — it tolerates the self-signed
+   * certificate on Asterisk's own port. Browsers do not, so `webWssUrl` points
+   * at the nginx vhost that fronts the same service with a trusted
+   * certificate. It falls back to `wssUrl` when unset.
+   */
   async getClientConfig(user: User): Promise<{
     wssUrl: string;
+    webWssUrl: string;
     sipDomain: string;
     sipUsername: string;
     sipPassword: string;
@@ -90,6 +98,13 @@ export class AsteriskProvider implements CallingProviderStrategy {
       );
     }
     const sipDomain: string = cfg.domain || new URL(cfg.wssUrl.replace(/^wss/, 'https')).hostname;
-    return { wssUrl: cfg.wssUrl, sipDomain, sipUsername, sipPassword, displayName: user.name };
+    return {
+      wssUrl: cfg.wssUrl,
+      webWssUrl: cfg.webWssUrl || cfg.wssUrl,
+      sipDomain,
+      sipUsername,
+      sipPassword,
+      displayName: user.name,
+    };
   }
 }

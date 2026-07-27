@@ -44,6 +44,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const finishedRef = useRef(false);
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
+  const isSipCallRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -120,6 +121,8 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
 
     if (shouldUseTelnyx(target)) {
       await placeTelnyxCall(target);
+    } else if (shouldUseSip(target)) {
+      await placeUaeSipCall(target);
     } else {
       // Grandstream / Native Dialer: the backend does the work.
       setState('connecting');
@@ -135,6 +138,101 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
         setMessage(err instanceof Error ? err.message : 'Call failed');
       }
     }
+  }
+
+  /**
+   * UAE numbers dial in-browser over SIP when the user has UAE access, so the
+   * call goes straight out instead of Asterisk ringing their line back first.
+   */
+  function shouldUseSip(target: string): boolean {
+    const uaeAccess = user?.regions?.includes('uae') || user?.provider === 'asterisk';
+    if (!uaeAccess) return false;
+    const n = target.replace(/[\s\-().]/g, '');
+    // +971 / 00971 / 971 international forms, or the 0XXXXXXXXX local form.
+    return (
+      n.startsWith('+971') ||
+      n.startsWith('00971') ||
+      /^971\d{8,}$/.test(n) ||
+      /^0\d{8,9}$/.test(n)
+    );
+  }
+
+  async function placeUaeSipCall(target: string) {
+    setState('connecting');
+    setMessage('Requesting microphone access…');
+    dialStartedAtRef.current = new Date().toISOString();
+    finishedRef.current = false;
+    isSipCallRef.current = true;
+
+    try {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        throw new Error('Microphone access is required to place a call.');
+      }
+
+      setMessage('Connecting to your SIP line…');
+      const { placeSipCall } = await import('@/lib/sip-client');
+
+      setMessage(`Dialing ${target}…`);
+      const call = await placeSipCall(target, audioRef.current as HTMLAudioElement, {
+        onProgress: () => {
+          setState('ringing');
+          setMessage(`Ringing ${target}…`);
+        },
+        onAnswered: () => {
+          if (!answeredAtRef.current) startTimer();
+          setState('active');
+          setMessage('In call');
+        },
+        onEnded: () => finishSipCall(target),
+        onFailed: (msg) => {
+          setState('error');
+          setMessage(msg);
+        },
+      });
+      // Reuse callRef so the shared Hang up button drives this call too.
+      callRef.current = call;
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error ? err.message : 'Could not start the call');
+    }
+  }
+
+  async function finishSipCall(target: string) {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    stopTimer();
+    const answered = answeredAtRef.current !== null;
+    const duration = answered
+      ? Math.floor((Date.now() - (answeredAtRef.current as number)) / 1000)
+      : 0;
+
+    setState('ended');
+    setMessage(answered ? `Call ended (${duration}s)` : 'Call ended — not answered');
+
+    try {
+      await api('/calls/log', {
+        method: 'POST',
+        body: {
+          phoneNumber: target,
+          direction: 'outbound',
+          status: answered ? 'completed' : 'no_answer',
+          durationSeconds: duration,
+          startedAt: dialStartedAtRef.current ?? undefined,
+          endedAt: new Date().toISOString(),
+          region: 'uae',
+          source: 'web',
+        },
+      });
+    } catch {
+      /* logging failure shouldn't break the UI */
+    }
+
+    answeredAtRef.current = null;
+    callRef.current = null;
+    isSipCallRef.current = false;
   }
 
   async function placeTelnyxCall(target: string) {
@@ -244,8 +342,9 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     } catch {
       /* noop */
     }
-    if (!clientRef.current) {
+    if (!clientRef.current && !isSipCallRef.current) {
       // Non-WebRTC call (PBX / native dialer): nothing more to wait for.
+      // Telnyx and SIP both settle in their own end-of-call handlers.
       setState('idle');
       setMessage('');
     }
@@ -352,7 +451,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       {(user?.regions?.length ?? 0) > 0 ? (
         <p className="mt-3 text-center text-xs text-slate-400">
           {user!.regions.map(r => r.toUpperCase()).join(' · ')} — +1 dials in-browser
-          {user!.regions.includes('uae') ? ', UAE rings your SIP line' : ''}
+          {user!.regions.includes('uae') ? ', UAE dials in-browser over SIP' : ''}
           {user!.regions.includes('india') ? ', India queues to mobile' : ''}
         </p>
       ) : user?.provider ? (
@@ -363,7 +462,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
             : user.provider === 'grandstream'
               ? 'Grandstream PBX (your extension will ring)'
               : user.provider === 'asterisk'
-                ? 'the SnappyConnect mobile app (in-app SIP dialer)'
+                ? 'your SIP line (browser softphone)'
                 : 'your mobile phone (native dialer)'}
         </p>
       ) : (
