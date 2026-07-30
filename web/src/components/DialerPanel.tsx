@@ -29,7 +29,13 @@ interface CallScript {
  * WebRTC; for Grandstream/Native Dialer users it asks the API to initiate
  * (PBX originate / queue to mobile) and shows the outcome.
  */
-export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) {
+export function DialerPanel({
+  initialNumber = '',
+  autoDial = false,
+}: {
+  initialNumber?: string;
+  autoDial?: boolean;
+}) {
   const user = getStoredUser();
   const [number, setNumber] = useState(initialNumber);
   const [state, setState] = useState<DialState>('idle');
@@ -45,6 +51,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const isSipCallRef = useRef(false);
+  const autoDialedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -57,6 +64,15 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       .then(setScripts)
       .catch(() => setScripts([]));
   }, []);
+
+  // Place the click-to-call number once, on arrival. Guarded by a ref so a
+  // re-render never redials, and skipped if the recruiter already started.
+  useEffect(() => {
+    if (!autoDial || !initialNumber || autoDialedRef.current) return;
+    autoDialedRef.current = true;
+    void placeCall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDial, initialNumber]);
 
   useEffect(() => {
     return () => {

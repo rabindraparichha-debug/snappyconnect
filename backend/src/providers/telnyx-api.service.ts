@@ -92,19 +92,60 @@ export class TelnyxApiService {
     }));
   }
 
-  /** Buy the first available US local number in the given area code. */
-  async purchaseNumber(areaCode: string): Promise<string> {
+  /** Voice+SMS numbers for sale in an area code, cheapest first. */
+  async searchAvailable(
+    areaCode: string,
+    limit = 10,
+  ): Promise<Array<{ phoneNumber: string; upfrontCost: string; monthlyCost: string }>> {
     const search = await this.request<any>(
       `/available_phone_numbers?filter[country_code]=US&filter[national_destination_code]=${areaCode}` +
-        '&filter[features][]=sms&filter[features][]=voice&filter[limit]=1',
+        `&filter[features][]=sms&filter[features][]=voice&filter[limit]=${limit}`,
     );
-    const number = search?.data?.[0]?.phone_number;
-    if (!number) throw new BadRequestException(`No numbers available in area code ${areaCode}.`);
+    return (search?.data ?? []).map((n: any) => ({
+      phoneNumber: n.phone_number,
+      upfrontCost: n.cost_information?.upfront_cost ?? '—',
+      monthlyCost: n.cost_information?.monthly_cost ?? '—',
+    }));
+  }
+
+  /** Buy a specific number, or the first available one in the area code. */
+  async purchaseNumber(areaCode: string, phoneNumber?: string): Promise<string> {
+    let number = phoneNumber;
+    if (!number) {
+      const [first] = await this.searchAvailable(areaCode, 1);
+      if (!first) throw new BadRequestException(`No numbers available in area code ${areaCode}.`);
+      number = first.phoneNumber;
+    }
     await this.request('/number_orders', {
       method: 'POST',
       body: { phone_numbers: [{ phone_number: number }] },
     });
     return number;
+  }
+
+  /** Voice API (Call Control) applications — the board line's IVR runs on one. */
+  async listCallControlApps(): Promise<Array<{ id: string; name: string; webhookUrl: string }>> {
+    const data = await this.request<any>('/call_control_applications?page[size]=50');
+    return (data?.data ?? []).map((a: any) => ({
+      id: String(a.id),
+      name: a.application_name,
+      webhookUrl: a.webhook_event_url,
+    }));
+  }
+
+  async createCallControlApp(name: string, webhookUrl: string): Promise<{ id: string }> {
+    const data = await this.request<any>('/call_control_applications', {
+      method: 'POST',
+      body: {
+        application_name: name,
+        webhook_event_url: webhookUrl,
+        webhook_api_version: '2',
+        // The IVR answers explicitly on call.initiated.
+        first_command_timeout: 30,
+        first_command_timeout_secs: 30,
+      },
+    });
+    return { id: String(data?.data?.id) };
   }
 
   // ----- Call Control (board line IVR) -----

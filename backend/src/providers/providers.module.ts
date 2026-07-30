@@ -9,6 +9,7 @@ import { AsteriskCdrService } from './asterisk-cdr.service';
 import { AsteriskProvider } from './asterisk.provider';
 import { GrandstreamProvider } from './grandstream.provider';
 import { NativeDialerProvider } from './native-dialer.provider';
+import { NumbersController } from './numbers.controller';
 import { ProvidersService } from './providers.service';
 import { TelnyxApiService } from './telnyx-api.service';
 import { TelnyxProvisioningService } from './telnyx-provisioning.service';
@@ -16,6 +17,7 @@ import { TelnyxProvider } from './telnyx.provider';
 
 @Module({
   imports: [SettingsModule, TypeOrmModule.forFeature([CallLog, CallRequest, User])],
+  controllers: [NumbersController],
   providers: [
     ProvidersService,
     TelnyxProvider,
