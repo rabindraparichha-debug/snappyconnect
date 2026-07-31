@@ -1,12 +1,13 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsOptional, IsString, Matches } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
+import { AsteriskAmiService } from './asterisk-ami.service';
 import { TelnyxApiService } from './telnyx-api.service';
 
 /** {options} is replaced with the live extension list when the call comes in. */
@@ -37,6 +38,54 @@ class ExtensionDto {
   digit: string;
 }
 
+/** The Dinstar's eight SIM slots. */
+export const SIM_PORTS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+/** Recruiters per SIM — three extensions share each SIM card. */
+export const EXTENSIONS_PER_SIM_PORT = 3;
+
+/** First SIP extension in the recruiter range. */
+const FIRST_EXTENSION = 2001;
+
+/** The three extensions that dial out on a given SIM port. */
+export function simPortExtensions(port: number): string[] {
+  const base = FIRST_EXTENSION + (port - 1) * EXTENSIONS_PER_SIM_PORT;
+  return Array.from({ length: EXTENSIONS_PER_SIM_PORT }, (_, i) => String(base + i));
+}
+
+/** Which SIM port an extension belongs to, or null if it is outside the range. */
+export function simPortForExtension(exten: string): number | null {
+  if (!/^\d+$/.test(exten)) return null;
+  const offset = Number(exten) - FIRST_EXTENSION;
+  if (offset < 0) return null;
+  const port = Math.floor(offset / EXTENSIONS_PER_SIM_PORT) + 1;
+  return SIM_PORTS.includes(port) ? port : null;
+}
+
+class SimPortLabelDto {
+  @IsInt()
+  @Min(1)
+  @Max(SIM_PORTS.length)
+  port: number;
+
+  /** The SIM's own number, for the admin's reference. Empty clears it. */
+  @IsString()
+  label: string;
+}
+
+class SimPinningDto {
+  @IsBoolean()
+  enabled: boolean;
+}
+
+class AssignSimExtensionDto {
+  @IsString()
+  userId: string;
+
+  @Matches(/^\d{4}$/, { message: 'exten must be a 4-digit extension' })
+  exten: string;
+}
+
 class IvrSettingsDto {
   /** Spoken greeting. {options} expands to the live extension list. */
   @IsOptional()
@@ -47,6 +96,11 @@ class IvrSettingsDto {
   @IsOptional()
   @IsString()
   operatorUserId?: string;
+}
+
+class RecordingSettingsDto {
+  @IsBoolean()
+  usaEnabled: boolean;
 }
 
 /**
@@ -62,6 +116,7 @@ export class NumbersController {
   constructor(
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
+    private readonly ami: AsteriskAmiService,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
   ) {}
@@ -132,6 +187,29 @@ export class NumbersController {
     return { phoneNumber: dto.phoneNumber, callControlAppId: appId, webhookUrl };
   }
 
+  // ----- Call recording -----
+
+  /** Whether USA (Telnyx) calls are recorded. UAE records on our own PBX. */
+  @Get('recording')
+  async recordingSettings() {
+    const cfg = await this.settings.getProviderSettings('telnyx');
+    return {
+      usaEnabled: Boolean(cfg.recordingEnabled),
+      uaeEnabled: true,
+      note: 'UAE calls record on the SnappyConnect PBX; USA calls record at Telnyx and are copied to your storage server.',
+    };
+  }
+
+  @Post('recording')
+  async setRecording(@Body() dto: RecordingSettingsDto) {
+    const profiles = await this.telnyx.listOutboundVoiceProfiles();
+    for (const profile of profiles) {
+      await this.telnyx.setOutboundRecording(profile.id, dto.usaEnabled);
+    }
+    await this.settings.updateProviderSettings('telnyx', { recordingEnabled: dto.usaEnabled });
+    return this.recordingSettings();
+  }
+
   // ----- Board-line extensions & greeting -----
 
   /** Everything the board line needs: greeting, operator, and the menu. */
@@ -200,5 +278,149 @@ export class NumbersController {
       await this.usersRepo.save(user);
     }
     return this.ivr();
+  }
+
+  // ----- Dinstar SIM ports (UAE) -----
+
+  /**
+   * The eight Dinstar SIM slots, each with the three SIP extensions that dial
+   * out on it and whoever holds them. Labels (the SIM's own number) are admin
+   * -entered; the extension numbering is fixed by `simPortExtensions`.
+   */
+  @Get('sim-ports')
+  async simPorts() {
+    const [users, cfg] = await Promise.all([
+      this.usersRepo.find(),
+      this.settings.getProviderSettings('dinstar'),
+    ]);
+    const labels: Record<string, string> = cfg.simPortLabels ?? {};
+
+    return {
+      // Pinning rides the UCM's `_8X.` outbound route. Until that exists a
+      // pinned call is answered with 404, so the UI warns before assigning.
+      pinningReady: cfg.pinningReady === true,
+      ports: SIM_PORTS.map((port) => ({
+        port,
+        label: labels[String(port)] ?? '',
+        extensions: simPortExtensions(port).map((exten) => {
+          const holder = users.find((u) => u.providerConfig?.sipUsername === exten);
+          return {
+            exten,
+            userId: holder?.id ?? null,
+            userName: holder?.name ?? null,
+            // A pinned recruiter with no SIP password cannot register at all.
+            missingSipPassword: holder ? !holder.providerConfig?.sipPassword : false,
+          };
+        }),
+      })),
+    };
+  }
+
+  /** Record the SIM card's own number against a port, for the admin's reference. */
+  @Post('sim-ports/label')
+  async setSimPortLabel(@Body() dto: SimPortLabelDto) {
+    const cfg = await this.settings.getProviderSettings('dinstar');
+    const labels: Record<string, string> = { ...(cfg.simPortLabels ?? {}) };
+    if (dto.label) labels[String(dto.port)] = dto.label;
+    else delete labels[String(dto.port)];
+    await this.settings.updateProviderSettings('dinstar', { simPortLabels: labels });
+    return this.simPorts();
+  }
+
+  /** Turn SIM pinning on once the UCM `_8X.` route and Dinstar rules exist. */
+  @Post('sim-ports/pinning')
+  async setPinning(@Body() dto: SimPinningDto) {
+    await this.settings.updateProviderSettings('dinstar', { pinningReady: dto.enabled });
+    // Push every stored assignment into (or out of) Asterisk so the switch
+    // takes effect immediately rather than on each recruiter's next edit.
+    const users = await this.usersRepo.find();
+    for (const u of users) {
+      const exten: string | undefined = u.providerConfig?.sipUsername;
+      const port: number | undefined = u.providerConfig?.simPort;
+      if (!exten || !port) continue;
+      await (dto.enabled
+        ? this.ami.setSimPort(exten, port)
+        : this.ami.clearSimPort(exten)
+      ).catch(() => undefined);
+    }
+    return this.simPorts();
+  }
+
+  /**
+   * Give a recruiter one of a port's extensions. This both assigns the SIP
+   * account and pins their outbound calls to that SIM, so the two can never
+   * drift apart. Whoever held the extension is released first.
+   */
+  @Post('sim-ports/assign')
+  async assignSimExtension(@Body() dto: AssignSimExtensionDto) {
+    const port = simPortForExtension(dto.exten);
+    if (port === null) {
+      throw new BadRequestException(`${dto.exten} is not a SIM port extension`);
+    }
+
+    const user = await this.usersRepo.findOne({ where: { id: dto.userId } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const everyone = await this.usersRepo.find();
+    for (const other of everyone) {
+      if (other.id === user.id) continue;
+      if (other.providerConfig?.sipUsername !== dto.exten) continue;
+      const cfg = { ...(other.providerConfig ?? {}) };
+      delete cfg.sipUsername;
+      delete cfg.simPort;
+      other.providerConfig = cfg;
+      await this.usersRepo.save(other);
+    }
+
+    // Release the extension this user held before, so no stale pin is left
+    // behind in Asterisk pointing their old line at a SIM.
+    const previous: string | undefined = user.providerConfig?.sipUsername;
+    if (previous && previous !== dto.exten) {
+      await this.ami.clearSimPort(previous).catch(() => undefined);
+    }
+
+    user.providerConfig = {
+      ...(user.providerConfig ?? {}),
+      sipUsername: dto.exten,
+      simPort: port,
+    };
+    await this.usersRepo.save(user);
+    await this.pushSimPin(dto.exten, port);
+    return this.simPorts();
+  }
+
+  /** Take an extension back; the holder keeps their account but loses the SIP line. */
+  @Delete('sim-ports/assign/:exten')
+  async unassignSimExtension(@Param('exten') exten: string) {
+    if (simPortForExtension(exten) === null) {
+      throw new BadRequestException(`${exten} is not a SIM port extension`);
+    }
+    const holder = (await this.usersRepo.find()).find(
+      (u) => u.providerConfig?.sipUsername === exten,
+    );
+    if (holder) {
+      const cfg = { ...(holder.providerConfig ?? {}) };
+      delete cfg.sipUsername;
+      delete cfg.simPort;
+      holder.providerConfig = cfg;
+      await this.usersRepo.save(holder);
+    }
+    await this.ami.clearSimPort(exten).catch(() => undefined);
+    return this.simPorts();
+  }
+
+  /**
+   * Push the pin into Asterisk, but only while pinning is switched on — with
+   * the UCM route missing, a pinned call fails outright whereas an unpinned
+   * one completes over the shared pool. The assignment is still stored either
+   * way, so switching pinning on later needs no reassignment.
+   */
+  private async pushSimPin(exten: string, port: number): Promise<void> {
+    const cfg = await this.settings.getProviderSettings('dinstar');
+    const action =
+      cfg.pinningReady === true
+        ? this.ami.setSimPort(exten, port)
+        : this.ami.clearSimPort(exten);
+    await action.catch(() => undefined);
   }
 }

@@ -29,13 +29,7 @@ interface CallScript {
  * WebRTC; for Grandstream/Native Dialer users it asks the API to initiate
  * (PBX originate / queue to mobile) and shows the outcome.
  */
-export function DialerPanel({
-  initialNumber = '',
-  autoDial = false,
-}: {
-  initialNumber?: string;
-  autoDial?: boolean;
-}) {
+export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) {
   const user = getStoredUser();
   const [number, setNumber] = useState(initialNumber);
   const [state, setState] = useState<DialState>('idle');
@@ -51,7 +45,6 @@ export function DialerPanel({
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const isSipCallRef = useRef(false);
-  const autoDialedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -65,14 +58,10 @@ export function DialerPanel({
       .catch(() => setScripts([]));
   }, []);
 
-  // Place the click-to-call number once, on arrival. Guarded by a ref so a
-  // re-render never redials, and skipped if the recruiter already started.
-  useEffect(() => {
-    if (!autoDial || !initialNumber || autoDialedRef.current) return;
-    autoDialedRef.current = true;
-    void placeCall();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoDial, initialNumber]);
+  // Click-to-call pre-fills the number and stops there. Dialling on arrival
+  // was tried and reverted: the page is opened programmatically, so there is
+  // no user gesture behind it and the browser refuses the microphone even when
+  // the recruiter has granted it. Their press of Call carries the gesture.
 
   useEffect(() => {
     return () => {
@@ -180,11 +169,36 @@ export function DialerPanel({
     isSipCallRef.current = true;
 
     try {
+      let micDeviceId: string | undefined;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        throw new Error('Microphone access is required to place a call.');
+        const { acquireMicrophone } = await import('@/lib/sip-client');
+        micDeviceId = await acquireMicrophone();
+      } catch (err) {
+        // Say which failure this is: "blocked" and "no microphone plugged in"
+        // need opposite fixes, and a bare "access required" sends people to
+        // re-grant a permission they already granted.
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          throw new Error('No microphone found — plug one in and try again.');
+        }
+        if (name === 'NotReadableError' || name === 'TrackStartError') {
+          throw new Error('Your microphone is in use by another app. Close it and try again.');
+        }
+        if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+          throw new Error(
+            'Your microphone could not be opened. Pick a different input under the padlock ' +
+              'in the address bar, or reconnect your headset, then press Call.',
+          );
+        }
+        // Chrome raises NotAllowedError both when the site permission is
+        // denied and when the browser app itself lacks microphone access from
+        // the operating system — the site shows "Allow" in that second case,
+        // so point at both. The raw name is kept for support.
+        throw new Error(
+          'Microphone blocked. Check the padlock in the address bar, and that your browser ' +
+            'is allowed the microphone in your system privacy settings. ' +
+            `(${name || 'unknown error'})`,
+        );
       }
 
       setMessage('Connecting to your SIP line…');
@@ -206,7 +220,7 @@ export function DialerPanel({
           setState('error');
           setMessage(msg);
         },
-      });
+      }, micDeviceId);
       // Reuse callRef so the shared Hang up button drives this call too.
       callRef.current = call;
     } catch (err) {

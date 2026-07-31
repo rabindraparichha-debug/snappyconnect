@@ -12,6 +12,7 @@ import { CallRequest } from './call-request.entity';
 import { User } from '../users/user.entity';
 import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
+import { RecordingsService } from './recordings.service';
 import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
 
@@ -27,7 +28,7 @@ import { WebhooksController } from './webhooks.controller';
     DncModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
-  providers: [CallsService],
-  exports: [CallsService],
+  providers: [CallsService, RecordingsService],
+  exports: [CallsService, RecordingsService],
 })
 export class CallsModule {}

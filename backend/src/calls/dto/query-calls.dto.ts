@@ -1,4 +1,6 @@
+import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -43,6 +45,12 @@ export class QueryCallsDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  /** Only calls that have an audio recording attached. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  hasRecording?: boolean;
 
   @IsOptional()
   @IsInt()

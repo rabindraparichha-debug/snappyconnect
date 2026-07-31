@@ -9,6 +9,7 @@ import { AsteriskCdrService } from './asterisk-cdr.service';
 import { AsteriskProvider } from './asterisk.provider';
 import { GrandstreamProvider } from './grandstream.provider';
 import { NativeDialerProvider } from './native-dialer.provider';
+import { RecordingsService } from '../calls/recordings.service';
 import { NumbersController } from './numbers.controller';
 import { ProvidersService } from './providers.service';
 import { TelnyxApiService } from './telnyx-api.service';
@@ -28,6 +29,7 @@ import { TelnyxProvider } from './telnyx.provider';
     AsteriskCdrService,
     TelnyxApiService,
     TelnyxProvisioningService,
+    RecordingsService,
   ],
   exports: [
     ProvidersService,

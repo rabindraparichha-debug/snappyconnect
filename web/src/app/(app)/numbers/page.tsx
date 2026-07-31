@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { Paginated, User } from '@/lib/types';
 import { Button, Card, EmptyState, Input, Modal, Select, Spinner } from '@/components/ui';
+import { SimPortsCard } from '@/components/SimPortsCard';
 
 interface AccountNumber {
   phoneNumber: string;
@@ -456,6 +457,8 @@ export default function NumbersPage() {
           </div>
         </div>
       </Card>
+
+      <SimPortsCard users={users} />
 
       {/* Buy */}
       <Modal open={buyOpen} title="Buy a US number" onClose={() => setBuyOpen(false)} wide>

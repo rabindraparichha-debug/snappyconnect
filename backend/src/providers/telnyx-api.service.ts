@@ -187,6 +187,31 @@ export class TelnyxApiService {
     await this.command(callControlId, 'hangup', {});
   }
 
+  /** Record a Call Control leg (board line); the file arrives by webhook. */
+  async startRecording(callControlId: string): Promise<void> {
+    await this.command(callControlId, 'record_start', {
+      format: 'mp3',
+      channels: 'single',
+    });
+  }
+
+  /**
+   * Recording for the WebRTC dialer is a property of the outbound voice
+   * profile — every call placed through it is captured, and Telnyx posts a
+   * call.recording.saved webhook when the audio is ready.
+   */
+  async setOutboundRecording(profileId: string, enabled: boolean): Promise<void> {
+    await this.request(`/outbound_voice_profiles/${profileId}`, {
+      method: 'PATCH',
+      body: { call_recording: { call_recording_type: enabled ? 'all' : 'none' } },
+    });
+  }
+
+  async listOutboundVoiceProfiles(): Promise<Array<{ id: string; name: string }>> {
+    const data = await this.request<any>('/outbound_voice_profiles?page[size]=50');
+    return (data?.data ?? []).map((p: any) => ({ id: String(p.id), name: p.name }));
+  }
+
   private async command(callControlId: string, action: string, body: Record<string, unknown>) {
     try {
       await this.request(`/calls/${encodeURIComponent(callControlId)}/actions/${action}`, {

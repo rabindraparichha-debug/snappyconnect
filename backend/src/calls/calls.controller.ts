@@ -30,6 +30,7 @@ import { InitiateCallDto } from './dto/initiate-call.dto';
 import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
+import { RecordingsService } from './recordings.service';
 
 @ApiTags('Calls')
 @ApiBearerAuth()
@@ -39,6 +40,7 @@ export class CallsController {
     private readonly callsService: CallsService,
     private readonly telnyxProvider: TelnyxProvider,
     private readonly asteriskProvider: AsteriskProvider,
+    private readonly recordings: RecordingsService,
   ) {}
 
   // ----- Initiation -----
@@ -199,14 +201,20 @@ export class CallsController {
     @Param('filename') filename: string,
     @Res() res: Response,
   ) {
-    const dir = process.env.RECORDINGS_DIR || '/opt/snappyconnect/recordings';
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '');
-    const filePath = join(dir, safeName);
-    if (!existsSync(filePath)) {
+    if (this.recordings.existsLocally(safeName)) {
+      res.sendFile(this.recordings.localPath(safeName));
+      return;
+    }
+    // Older calls live only on the archive server — stream them back.
+    const stream = this.recordings.archiveStream(safeName);
+    if (!stream) {
       res.status(404).json({ message: 'Recording not found' });
       return;
     }
-    res.sendFile(filePath);
+    res.setHeader('Content-Type', this.recordings.contentType(safeName));
+    stream.pipe(res);
+    stream.on('error', () => res.end());
   }
 
   // ----- History -----

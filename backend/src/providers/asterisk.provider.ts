@@ -55,9 +55,7 @@ export class AsteriskProvider implements CallingProviderStrategy {
       );
     }
 
-    const dialUrl =
-      `${this.webAppUrl}/dial` +
-      `?number=${encodeURIComponent(input.phoneNumber)}&autodial=1`;
+    const dialUrl = `${this.webAppUrl}/dial?number=${encodeURIComponent(input.phoneNumber)}`;
 
     return {
       action: 'client_dial',
