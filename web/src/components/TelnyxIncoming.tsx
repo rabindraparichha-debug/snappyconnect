@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
+import { CallRecorder } from '@/lib/call-recorder';
 import { getTelnyxClient } from '@/lib/telnyx-client';
 import type { User } from '@/lib/types';
 import { Button } from '@/components/ui';
@@ -21,6 +22,8 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
   const answeredAtRef = useRef<number | null>(null);
   const startedAtRef = useRef<string | null>(null);
   const loggedIdsRef = useRef<Set<string>>(new Set());
+  const recorderRef = useRef<CallRecorder | null>(null);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const capable = Boolean(
@@ -47,6 +50,7 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
           break;
         case 'active':
           setInCall(true);
+          startRecording(call);
           if (!answeredAtRef.current) {
             answeredAtRef.current = Date.now();
             timerRef.current = setInterval(() => {
@@ -86,6 +90,24 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capable, user?.id]);
 
+  useEffect(() => {
+    if (!capable) return;
+    api<{ browserRecording: boolean }>('/calls/recording-policy')
+      .then((policy) => setRecordingEnabled(policy.browserRecording))
+      .catch(() => setRecordingEnabled(false));
+  }, [capable]);
+
+  /** Free browser-side recording, same as the outbound dialer. */
+  function startRecording(call: any) {
+    if (recorderRef.current || !recordingEnabled) return;
+    const remote: MediaStream | null =
+      call?.remoteStream ?? (audioRef.current?.srcObject as MediaStream | null) ?? null;
+    const recorder = new CallRecorder();
+    if (recorder.start(call?.localStream ?? null, remote)) {
+      recorderRef.current = recorder;
+    }
+  }
+
   function finishCall(call: any) {
     const id: string = call?.id ?? 'unknown';
     if (loggedIdsRef.current.has(id)) return;
@@ -103,20 +125,29 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
     setInCall(false);
     setElapsed(0);
 
-    api('/calls/log', {
-      method: 'POST',
-      body: {
-        phoneNumber: caller || 'unknown',
-        direction: 'inbound',
-        status: answered ? 'completed' : 'missed',
-        durationSeconds: duration,
-        startedAt: startedAtRef.current ?? undefined,
-        endedAt: new Date().toISOString(),
-        externalId: call?.telnyxIDs?.telnyxLegId ?? id,
-      },
-    }).catch(() => {
-      /* logging failure shouldn't break the UI */
-    });
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+
+    void (async () => {
+      const audio = await recorder?.stop().catch(() => null);
+      try {
+        const log = await api<{ id: string }>('/calls/log', {
+          method: 'POST',
+          body: {
+            phoneNumber: caller || 'unknown',
+            direction: 'inbound',
+            status: answered ? 'completed' : 'missed',
+            durationSeconds: duration,
+            startedAt: startedAtRef.current ?? undefined,
+            endedAt: new Date().toISOString(),
+            externalId: call?.telnyxIDs?.telnyxLegId ?? id,
+          },
+        });
+        if (audio && log?.id) await CallRecorder.upload(log.id, audio);
+      } catch {
+        /* logging failure shouldn't break the UI */
+      }
+    })();
   }
 
   async function answer() {

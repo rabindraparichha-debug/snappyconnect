@@ -99,8 +99,15 @@ class IvrSettingsDto {
 }
 
 class RecordingSettingsDto {
+  /** Carrier-side recording at Telnyx (billed per minute). */
+  @IsOptional()
   @IsBoolean()
-  usaEnabled: boolean;
+  usaEnabled?: boolean;
+
+  /** Free capture in the recruiter's browser, uploaded to our storage. */
+  @IsOptional()
+  @IsBoolean()
+  browserRecording?: boolean;
 }
 
 /**
@@ -194,19 +201,27 @@ export class NumbersController {
   async recordingSettings() {
     const cfg = await this.settings.getProviderSettings('telnyx');
     return {
+      // Browser capture is free, so it is the default for USA calls.
+      browserRecording: cfg.browserRecording !== false,
       usaEnabled: Boolean(cfg.recordingEnabled),
       uaeEnabled: true,
-      note: 'UAE calls record on the SnappyConnect PBX; USA calls record at Telnyx and are copied to your storage server.',
     };
   }
 
   @Post('recording')
   async setRecording(@Body() dto: RecordingSettingsDto) {
-    const profiles = await this.telnyx.listOutboundVoiceProfiles();
-    for (const profile of profiles) {
-      await this.telnyx.setOutboundRecording(profile.id, dto.usaEnabled);
+    if (dto.usaEnabled !== undefined) {
+      const profiles = await this.telnyx.listOutboundVoiceProfiles();
+      for (const profile of profiles) {
+        await this.telnyx.setOutboundRecording(profile.id, dto.usaEnabled);
+      }
+      await this.settings.updateProviderSettings('telnyx', { recordingEnabled: dto.usaEnabled });
     }
-    await this.settings.updateProviderSettings('telnyx', { recordingEnabled: dto.usaEnabled });
+    if (dto.browserRecording !== undefined) {
+      await this.settings.updateProviderSettings('telnyx', {
+        browserRecording: dto.browserRecording,
+      });
+    }
     return this.recordingSettings();
   }
 

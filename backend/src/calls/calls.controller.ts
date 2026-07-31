@@ -31,6 +31,7 @@ import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
 import { RecordingsService } from './recordings.service';
+import { SettingsService } from '../settings/settings.service';
 
 @ApiTags('Calls')
 @ApiBearerAuth()
@@ -41,6 +42,7 @@ export class CallsController {
     private readonly telnyxProvider: TelnyxProvider,
     private readonly asteriskProvider: AsteriskProvider,
     private readonly recordings: RecordingsService,
+    private readonly settings: SettingsService,
   ) {}
 
   // ----- Initiation -----
@@ -165,6 +167,17 @@ export class CallsController {
     @Query('limit') limit?: string,
   ) {
     return this.callsService.upcomingFollowUps(user, limit ? Number(limit) : 10);
+  }
+
+  /**
+   * Whether the browser should record calls itself. Browser-side capture costs
+   * nothing (the carrier never records), so this is on unless an admin
+   * disables it. Readable by every signed-in user — the dialer needs it.
+   */
+  @Get('recording-policy')
+  async recordingPolicy() {
+    const cfg = await this.settings.getProviderSettings('telnyx');
+    return { browserRecording: cfg.browserRecording !== false };
   }
 
   // ----- Recording upload -----

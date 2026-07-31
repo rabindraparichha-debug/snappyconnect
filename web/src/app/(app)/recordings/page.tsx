@@ -10,9 +10,9 @@ import { Button, Card, EmptyState, Input, Select, Spinner } from '@/components/u
 const LIMIT = 20;
 
 interface RecordingSettings {
+  browserRecording: boolean;
   usaEnabled: boolean;
   uaeEnabled: boolean;
-  note: string;
 }
 
 export default function RecordingsPage() {
@@ -55,16 +55,10 @@ export default function RecordingsPage() {
       .catch(() => setSettings(null));
   }, []);
 
-  async function toggleUsaRecording() {
-    if (!settings) return;
+  async function updateSetting(body: Record<string, boolean>) {
     setSavingSetting(true);
     try {
-      setSettings(
-        await api<RecordingSettings>('/numbers/recording', {
-          method: 'POST',
-          body: { usaEnabled: !settings.usaEnabled },
-        }),
-      );
+      setSettings(await api<RecordingSettings>('/numbers/recording', { method: 'POST', body }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change the recording setting');
     } finally {
@@ -134,24 +128,46 @@ export default function RecordingsPage() {
           <div className="mt-3 space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-medium text-slate-800">USA calls (Telnyx)</p>
+                <p className="text-sm font-medium text-slate-800">
+                  In-app recording (USA calls) — free
+                </p>
                 <p className="text-xs text-slate-500">
-                  Recorded by the carrier, then copied to your storage server.
+                  Captured in the recruiter&apos;s browser and uploaded here. No carrier charges.
+                  Only records calls made from the web app while the tab stays open.
                 </p>
               </div>
               <Button
-                variant={settings.usaEnabled ? 'danger' : 'primary'}
+                variant={settings.browserRecording ? 'danger' : 'primary'}
                 disabled={savingSetting}
-                onClick={toggleUsaRecording}
+                onClick={() => updateSetting({ browserRecording: !settings.browserRecording })}
+              >
+                {savingSetting ? 'Saving…' : settings.browserRecording ? 'Turn off' : 'Turn on'}
+              </Button>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
+              <div>
+                <p className="text-sm font-medium text-slate-800">
+                  Carrier recording (USA calls) — paid
+                </p>
+                <p className="text-xs text-slate-500">
+                  Telnyx records every call server-side (about $0.002/min plus storage). Catches
+                  calls the browser can&apos;t — closed tabs, mobile app. Leave off unless you need
+                  that.
+                </p>
+              </div>
+              <Button
+                variant={settings.usaEnabled ? 'danger' : 'secondary'}
+                disabled={savingSetting}
+                onClick={() => updateSetting({ usaEnabled: !settings.usaEnabled })}
               >
                 {savingSetting ? 'Saving…' : settings.usaEnabled ? 'Turn off' : 'Turn on'}
               </Button>
             </div>
             <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
               <div>
-                <p className="text-sm font-medium text-slate-800">UAE calls (PBX)</p>
+                <p className="text-sm font-medium text-slate-800">UAE calls (PBX) — free</p>
                 <p className="text-xs text-slate-500">
-                  Recorded on your own server — always on, no per-minute cost.
+                  Recorded on your own server by the PBX. Always on, no per-minute cost.
                 </p>
               </div>
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">

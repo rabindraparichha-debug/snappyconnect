@@ -191,25 +191,39 @@ export async function placeSipCall(
 
   let settled = false;
 
+  // Play whatever the far side sends, whenever it starts. The GSM network's
+  // ringback arrives as early media on the 183 — well before the session is
+  // Established — so waiting for answer to attach audio leaves the recruiter
+  // in silence while the candidate's phone rings.
+  const attachRemoteAudio = () => {
+    const sdh: any = inviter.sessionDescriptionHandler;
+    const pc: RTCPeerConnection | undefined = sdh?.peerConnection;
+    if (!pc) return;
+    pc.ontrack = (ev: RTCTrackEvent) => {
+      remoteAudio.srcObject = ev.streams?.[0] ?? new MediaStream([ev.track]);
+      remoteAudio.play().catch(() => {
+        /* autoplay policies vary; the call itself is unaffected */
+      });
+    };
+    // Tracks negotiated before the handler was set.
+    const tracks = pc.getReceivers().flatMap((r) => (r.track ? [r.track] : []));
+    if (tracks.length) {
+      remoteAudio.srcObject = new MediaStream(tracks);
+      remoteAudio.play().catch(() => {
+        /* as above */
+      });
+    }
+  };
+
   inviter.stateChange.addListener((state: string) => {
     switch (state) {
       case SessionState.Establishing:
+        attachRemoteAudio();
         handlers.onProgress?.();
         break;
       case SessionState.Established: {
-        // Attach the far end's audio once media is negotiated.
-        const sdh: any = inviter.sessionDescriptionHandler;
-        const pc: RTCPeerConnection | undefined = sdh?.peerConnection;
-        if (pc) {
-          const stream = new MediaStream();
-          pc.getReceivers().forEach((r) => {
-            if (r.track) stream.addTrack(r.track);
-          });
-          remoteAudio.srcObject = stream;
-          remoteAudio.play().catch(() => {
-            /* autoplay policies vary; the call itself is unaffected */
-          });
-        }
+        // Re-attach in case the SDH did not exist yet at Establishing.
+        attachRemoteAudio();
         handlers.onAnswered?.();
         break;
       }

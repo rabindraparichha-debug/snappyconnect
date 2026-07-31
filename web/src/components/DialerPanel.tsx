@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
+import { CallRecorder } from '@/lib/call-recorder';
 import { getFromNumber, getTelnyxClient } from '@/lib/telnyx-client';
 import type { InitiateCallResult } from '@/lib/types';
 import { Button, Input, cn } from '@/components/ui';
@@ -37,6 +38,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const [elapsed, setElapsed] = useState(0);
   const [scripts, setScripts] = useState<CallScript[]>([]);
   const [openScriptId, setOpenScriptId] = useState<string | null>(null);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
 
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
@@ -45,6 +47,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const isSipCallRef = useRef(false);
+  const recorderRef = useRef<CallRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -56,6 +59,12 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     api<CallScript[]>('/scripts')
       .then(setScripts)
       .catch(() => setScripts([]));
+  }, []);
+
+  useEffect(() => {
+    api<{ browserRecording: boolean }>('/calls/recording-policy')
+      .then((policy) => setRecordingEnabled(policy.browserRecording))
+      .catch(() => setRecordingEnabled(false));
   }, []);
 
   // Click-to-call pre-fills the number and stops there. Dialling on arrival
@@ -310,6 +319,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
             if (!answeredAtRef.current) startTimer();
             setState('active');
             setMessage('In call');
+            startRecording(call);
             break;
           case 'hangup':
           case 'destroy':
@@ -324,6 +334,21 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     } catch (err) {
       setState('error');
       setMessage(err instanceof Error ? err.message : 'Could not start the call');
+    }
+  }
+
+  /**
+   * Capture the call in the browser (free) rather than paying the carrier to
+   * record. Needs both streams, so it starts once the call is answered.
+   */
+  function startRecording(call: any) {
+    if (recorderRef.current || !recordingEnabled) return;
+    const remote: MediaStream | null =
+      call?.remoteStream ?? (audioRef.current?.srcObject as MediaStream | null) ?? null;
+    const local: MediaStream | null = call?.localStream ?? null;
+    const recorder = new CallRecorder();
+    if (recorder.start(local, remote)) {
+      recorderRef.current = recorder;
     }
   }
 
@@ -343,8 +368,12 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     const externalId =
       callRef.current?.telnyxIDs?.telnyxLegId ?? callRef.current?.id ?? undefined;
 
+    // Stop the recorder first so the audio is ready to attach to the log.
+    const audio = await recorderRef.current?.stop().catch(() => null);
+    recorderRef.current = null;
+
     try {
-      await api('/calls/log', {
+      const log = await api<{ id: string }>('/calls/log', {
         method: 'POST',
         body: {
           phoneNumber: target,
@@ -356,6 +385,15 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           externalId,
         },
       });
+      if (audio && log?.id) {
+        setMessage('Saving recording…');
+        const saved = await CallRecorder.upload(log.id, audio);
+        setMessage(
+          saved
+            ? `Call ended (${duration}s) · recording saved`
+            : `Call ended (${duration}s) · recording could not be saved`,
+        );
+      }
     } catch {
       /* logging failure shouldn't break the UI */
     }
