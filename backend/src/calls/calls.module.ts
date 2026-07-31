@@ -5,6 +5,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { DncModule } from '../dnc/dnc.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { SettingsModule } from '../settings/settings.module';
 import { SmsModule } from '../sms/sms.module';
 import { CallLog } from './call-log.entity';
 import { CallRequest } from './call-request.entity';
@@ -18,6 +19,7 @@ import { WebhooksController } from './webhooks.controller';
   imports: [
     TypeOrmModule.forFeature([CallLog, CallRequest, User]),
     ProvidersModule,
+    SettingsModule,
     SmsModule,
     NotificationsModule,
     ActivityModule,

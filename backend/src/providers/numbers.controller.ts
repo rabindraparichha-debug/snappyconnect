@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, Matches } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -8,6 +8,11 @@ import { Role } from '../common/enums';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
 import { TelnyxApiService } from './telnyx-api.service';
+
+/** {options} is replaced with the live extension list when the call comes in. */
+export const DEFAULT_GREETING =
+  'Welcome to SnappyHires. {options} If you know the extension, please press it now, ' +
+  'or stay on the line and an operator will answer.';
 
 class BuyNumberDto {
   @Matches(/^\d{3}$/, { message: 'areaCode must be 3 digits' })
@@ -22,6 +27,26 @@ class BuyNumberDto {
 class BoardLineDto {
   @IsString()
   phoneNumber: string;
+}
+
+class ExtensionDto {
+  @IsString()
+  userId: string;
+
+  @Matches(/^[1-9]$/, { message: 'digit must be 1-9' })
+  digit: string;
+}
+
+class IvrSettingsDto {
+  /** Spoken greeting. {options} expands to the live extension list. */
+  @IsOptional()
+  @IsString()
+  ivrGreeting?: string;
+
+  /** User who answers when the caller presses nothing ("the operator"). */
+  @IsOptional()
+  @IsString()
+  operatorUserId?: string;
 }
 
 /**
@@ -105,5 +130,75 @@ export class NumbersController {
       boardLineNumber: dto.phoneNumber,
     });
     return { phoneNumber: dto.phoneNumber, callControlAppId: appId, webhookUrl };
+  }
+
+  // ----- Board-line extensions & greeting -----
+
+  /** Everything the board line needs: greeting, operator, and the menu. */
+  @Get('ivr')
+  async ivr() {
+    const [cfg, users] = await Promise.all([
+      this.settings.getProviderSettings('telnyx'),
+      this.usersRepo.find(),
+    ]);
+
+    const extensions = users
+      .filter((u) => u.providerConfig?.ivrDigit)
+      .map((u) => ({
+        digit: String(u.providerConfig.ivrDigit),
+        userId: u.id,
+        name: u.name,
+        email: u.email,
+        ringsTo: u.providerConfig?.telnyxNumber ?? u.mobileNumber ?? null,
+      }))
+      .sort((a, b) => a.digit.localeCompare(b.digit));
+
+    return {
+      boardLineNumber: cfg.boardLineNumber ?? null,
+      greeting: cfg.ivrGreeting ?? DEFAULT_GREETING,
+      operatorUserId: cfg.operatorUserId ?? null,
+      extensions,
+    };
+  }
+
+  @Post('ivr')
+  async updateIvr(@Body() dto: IvrSettingsDto) {
+    await this.settings.updateProviderSettings('telnyx', {
+      ...(dto.ivrGreeting !== undefined ? { ivrGreeting: dto.ivrGreeting } : {}),
+      ...(dto.operatorUserId !== undefined ? { operatorUserId: dto.operatorUserId } : {}),
+    });
+    return this.ivr();
+  }
+
+  /** Give a user a menu digit (replacing whoever held it). */
+  @Post('extensions')
+  async setExtension(@Body() dto: ExtensionDto) {
+    const user = await this.usersRepo.findOne({ where: { id: dto.userId } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const holder = await this.usersRepo.find();
+    for (const other of holder) {
+      if (other.id !== user.id && String(other.providerConfig?.ivrDigit) === dto.digit) {
+        other.providerConfig = { ...(other.providerConfig ?? {}), ivrDigit: undefined };
+        delete other.providerConfig.ivrDigit;
+        await this.usersRepo.save(other);
+      }
+    }
+
+    user.providerConfig = { ...(user.providerConfig ?? {}), ivrDigit: dto.digit };
+    await this.usersRepo.save(user);
+    return this.ivr();
+  }
+
+  @Delete('extensions/:userId')
+  async removeExtension(@Param('userId') userId: string) {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (user) {
+      const cfg = { ...(user.providerConfig ?? {}) };
+      delete cfg.ivrDigit;
+      user.providerConfig = cfg;
+      await this.usersRepo.save(user);
+    }
+    return this.ivr();
   }
 }

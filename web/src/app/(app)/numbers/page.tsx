@@ -19,6 +19,21 @@ interface AvailableNumber {
   monthlyCost: string;
 }
 
+interface Extension {
+  digit: string;
+  userId: string;
+  name: string;
+  email: string;
+  ringsTo: string | null;
+}
+
+interface IvrConfig {
+  boardLineNumber: string | null;
+  greeting: string;
+  operatorUserId: string | null;
+  extensions: Extension[];
+}
+
 /** Popular metros first — a recognisable area code lifts answer rates. */
 const AREA_CODES = [
   { code: '332', label: '332 — New York, NY' },
@@ -44,15 +59,28 @@ export default function NumbersPage() {
   const [assigning, setAssigning] = useState<AccountNumber | null>(null);
   const [assignUserId, setAssignUserId] = useState('');
 
+  // Board-line IVR: greeting, operator, and the extension list.
+  const [ivr, setIvr] = useState<IvrConfig | null>(null);
+  const [greeting, setGreeting] = useState('');
+  const [operatorId, setOperatorId] = useState('');
+  const [savingIvr, setSavingIvr] = useState(false);
+  const [ivrSaved, setIvrSaved] = useState(false);
+  const [newExtUser, setNewExtUser] = useState('');
+  const [newExtDigit, setNewExtDigit] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nums, userList] = await Promise.all([
+      const [nums, userList, ivrConfig] = await Promise.all([
         api<AccountNumber[]>('/numbers'),
         api<Paginated<User>>('/users', { query: { limit: 100 } }),
+        api<IvrConfig>('/numbers/ivr'),
       ]);
       setNumbers(nums);
       setUsers(userList.items);
+      setIvr(ivrConfig);
+      setGreeting(ivrConfig.greeting);
+      setOperatorId(ivrConfig.operatorUserId ?? '');
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load numbers');
@@ -145,7 +173,62 @@ export default function NumbersPage() {
     }
   }
 
-  const withDigits = users.filter((u) => u.providerConfig?.ivrDigit);
+  async function saveIvr() {
+    setSavingIvr(true);
+    setError(null);
+    try {
+      const updated = await api<IvrConfig>('/numbers/ivr', {
+        method: 'POST',
+        body: { ivrGreeting: greeting, operatorUserId: operatorId || null },
+      });
+      setIvr(updated);
+      setIvrSaved(true);
+      setTimeout(() => setIvrSaved(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the greeting');
+    } finally {
+      setSavingIvr(false);
+    }
+  }
+
+  async function addExtension() {
+    if (!newExtUser || !newExtDigit) return;
+    setSavingIvr(true);
+    setError(null);
+    try {
+      const updated = await api<IvrConfig>('/numbers/extensions', {
+        method: 'POST',
+        body: { userId: newExtUser, digit: newExtDigit },
+      });
+      setIvr(updated);
+      setNewExtUser('');
+      setNewExtDigit('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add the extension');
+    } finally {
+      setSavingIvr(false);
+    }
+  }
+
+  async function removeExtension(ext: Extension) {
+    if (!window.confirm(`Remove extension ${ext.digit} (${ext.name})?`)) return;
+    setSavingIvr(true);
+    try {
+      const updated = await api<IvrConfig>(`/numbers/extensions/${ext.userId}`, {
+        method: 'DELETE',
+      });
+      setIvr(updated);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove the extension');
+    } finally {
+      setSavingIvr(false);
+    }
+  }
+
+  const usedDigits = new Set(ivr?.extensions.map((e) => e.digit) ?? []);
+  const freeDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].filter((d) => !usedDigits.has(d));
 
   return (
     <div>
@@ -252,38 +335,126 @@ export default function NumbersPage() {
       </Card>
 
       <Card className="mt-5 p-5">
-        <h2 className="text-sm font-semibold text-slate-900">Board-line menu</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Callers to the board line hear these options. Set a user&apos;s digit in Users → Edit →
-          Board-line menu digit.
-        </p>
-        {withDigits.length === 0 ? (
-          <p className="mt-3 text-sm text-amber-600">
-            No extensions yet — callers will be told no agents are configured.
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-900">Board-line menu (IVR)</h2>
+          {ivr?.boardLineNumber ? (
+            <span className="text-xs text-slate-500">
+              Callers to <span className="font-medium">{ivr.boardLineNumber}</span> hear this
+            </span>
+          ) : (
+            <span className="text-xs text-amber-600">
+              No board line set — use “Make board line” above
+            </span>
+          )}
+        </div>
+
+        {/* Greeting */}
+        <div className="mt-4">
+          <label className="mb-1 block text-sm font-medium text-slate-700">Greeting</label>
+          <textarea
+            rows={3}
+            value={greeting}
+            onChange={(e) => setGreeting(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            <code className="rounded bg-slate-100 px-1">{'{options}'}</code> is replaced with the
+            live extension list (“For Alex, press 1.”). Callers who press nothing go to the
+            operator.
           </p>
-        ) : (
-          <ul className="mt-3 space-y-1.5">
-            {withDigits
-              .sort((a, b) =>
-                String(a.providerConfig?.ivrDigit).localeCompare(String(b.providerConfig?.ivrDigit)),
-              )
-              .map((u) => (
-                <li key={u.id} className="flex items-center gap-3 text-sm">
-                  <span className="flex h-6 w-6 items-center justify-center rounded bg-brand-50 text-xs font-bold text-brand-700">
-                    {u.providerConfig?.ivrDigit}
+        </div>
+
+        {/* Operator */}
+        <div className="mt-4 max-w-sm">
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Operator (answers when no digit is pressed)
+          </label>
+          <Select value={operatorId} onChange={(e) => setOperatorId(e.target.value)}>
+            <option value="">First extension (default)</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+                {u.providerConfig?.telnyxNumber
+                  ? ` — ${u.providerConfig.telnyxNumber}`
+                  : u.mobileNumber
+                    ? ` — ${u.mobileNumber}`
+                    : ' — no number yet'}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <Button onClick={saveIvr} disabled={savingIvr}>
+            {savingIvr ? 'Saving…' : 'Save greeting'}
+          </Button>
+          {ivrSaved && <span className="text-xs text-emerald-600">Saved</span>}
+        </div>
+
+        {/* Extensions */}
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <h3 className="text-sm font-semibold text-slate-900">Extensions</h3>
+          {!ivr || ivr.extensions.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">
+              No extensions yet — every caller goes straight to the operator.
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-slate-100">
+              {ivr.extensions.map((ext) => (
+                <li key={ext.userId} className="flex items-center gap-3 py-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded bg-brand-50 text-sm font-bold text-brand-700">
+                    {ext.digit}
                   </span>
-                  <span className="font-medium text-slate-800">{u.name}</span>
-                  <span className="text-xs text-slate-400">
-                    {u.providerConfig?.telnyxNumber
-                      ? `rings ${u.providerConfig.telnyxNumber}`
-                      : u.mobileNumber
-                        ? `rings ${u.mobileNumber}`
-                        : 'no destination — assign a direct line'}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-800">{ext.name}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      {ext.ringsTo ? `rings ${ext.ringsTo}` : 'no destination — assign a number'}
+                    </p>
+                  </div>
+                  {!ext.ringsTo && <Tag tone="slate">needs number</Tag>}
+                  <Button
+                    variant="ghost"
+                    className="!px-2 !py-1 text-xs"
+                    disabled={savingIvr}
+                    onClick={() => removeExtension(ext)}
+                  >
+                    Remove
+                  </Button>
                 </li>
               ))}
-          </ul>
-        )}
+            </ul>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-end gap-2">
+            <div className="min-w-[12rem] flex-1">
+              <label className="mb-1 block text-xs font-medium text-slate-600">User</label>
+              <Select value={newExtUser} onChange={(e) => setNewExtUser(e.target.value)}>
+                <option value="">Select a user…</option>
+                {users
+                  .filter((u) => !usedDigits.has(String(u.providerConfig?.ivrDigit ?? '')))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+              </Select>
+            </div>
+            <div className="w-28">
+              <label className="mb-1 block text-xs font-medium text-slate-600">Digit</label>
+              <Select value={newExtDigit} onChange={(e) => setNewExtDigit(e.target.value)}>
+                <option value="">—</option>
+                {freeDigits.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Button onClick={addExtension} disabled={!newExtUser || !newExtDigit || savingIvr}>
+              Add extension
+            </Button>
+          </div>
+        </div>
       </Card>
 
       {/* Buy */}
