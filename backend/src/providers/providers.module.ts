@@ -12,6 +12,7 @@ import { NativeDialerProvider } from './native-dialer.provider';
 import { RecordingsService } from '../calls/recordings.service';
 import { NumbersController } from './numbers.controller';
 import { ProvidersService } from './providers.service';
+import { SipPoolService } from './sip-pool.service';
 import { TelnyxApiService } from './telnyx-api.service';
 import { TelnyxProvisioningService } from './telnyx-provisioning.service';
 import { TelnyxProvider } from './telnyx.provider';
@@ -30,9 +31,11 @@ import { TelnyxProvider } from './telnyx.provider';
     TelnyxApiService,
     TelnyxProvisioningService,
     RecordingsService,
+    SipPoolService,
   ],
   exports: [
     ProvidersService,
+    SipPoolService,
     TelnyxProvider,
     AsteriskProvider,
     TelnyxApiService,

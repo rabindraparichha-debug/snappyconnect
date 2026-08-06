@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
 import { Repository } from 'typeorm';
-import { Role, UserStatus } from '../common/enums';
+import { Region, Role, UserStatus } from '../common/enums';
+import { SipPoolService } from '../providers/sip-pool.service';
 import { AssignProviderDto } from './dto/assign-provider.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -16,10 +18,40 @@ import { User } from './user.entity';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    private readonly sipPool: SipPoolService,
   ) {}
+
+  /**
+   * Serially auto-assign the lowest free Asterisk extension to a UAE user
+   * that has none. Mutates (does not save) the user; a full pool just logs —
+   * account creation must never fail over line availability.
+   */
+  private async autoAssignSipLine(user: User): Promise<void> {
+    if (!(user.regions ?? []).includes(Region.UAE)) return;
+    if (user.providerConfig?.sipUsername) return;
+
+    const all = await this.usersRepo.find();
+    const taken = new Set<string>(
+      all.map((u) => u.providerConfig?.sipUsername).filter(Boolean),
+    );
+    const line = await this.sipPool.nextFree(taken);
+    if (!line) {
+      if ((await this.sipPool.pool()).length > 0) {
+        this.logger.warn(`SIP pool exhausted — ${user.email} has no line`);
+      }
+      return;
+    }
+    user.providerConfig = {
+      ...(user.providerConfig ?? {}),
+      sipUsername: line.username,
+      sipPassword: line.password,
+    };
+  }
 
   async create(dto: CreateUserDto): Promise<User> {
     const existing = await this.usersRepo.findOne({ where: { email: dto.email.toLowerCase() } });
@@ -31,6 +63,7 @@ export class UsersService {
       email: dto.email.toLowerCase(),
       passwordHash: await bcrypt.hash(password, 10),
     });
+    await this.autoAssignSipLine(user);
     const saved = await this.usersRepo.save(user);
     return this.sanitize(saved);
   }
@@ -115,6 +148,9 @@ export class UsersService {
     }
     if (password) user.passwordHash = await bcrypt.hash(password, 10);
 
+    // Granting UAE access to an existing user picks up a line the same way
+    // creation does.
+    await this.autoAssignSipLine(user);
     const saved = await this.usersRepo.save(user);
     return this.sanitize(saved);
   }
