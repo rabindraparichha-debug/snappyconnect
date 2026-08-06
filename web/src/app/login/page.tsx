@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, setSession } from '@/lib/api';
 import type { User } from '@/lib/types';
@@ -70,6 +71,11 @@ export default function LoginPage() {
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
+          <p className="mt-4 text-center text-sm">
+            <Link href="/forgot-password" className="text-brand-600 hover:underline">
+              Forgot your password?
+            </Link>
+          </p>
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           Admins and users sign in here with the credentials provided by their administrator.

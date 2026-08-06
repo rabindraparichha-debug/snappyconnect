@@ -18,6 +18,8 @@ export default function ContactsPage() {
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
   const [history, setHistory] = useState<CallLog[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMessage, setAiMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +51,23 @@ export default function ContactsPage() {
       setHistory([]);
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function aiCall(phone: string, contactName?: string) {
+    if (!window.confirm(`Have the AI agent call ${contactName || phone}?`)) return;
+    setAiBusy(true);
+    setAiMessage(null);
+    try {
+      const res = await api<{ message: string }>('/ai-calls', {
+        method: 'POST',
+        body: { phoneNumber: phone, contactName },
+      });
+      setAiMessage(res.message);
+    } catch (err) {
+      setAiMessage(err instanceof Error ? err.message : 'AI call failed');
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -142,11 +161,25 @@ export default function ContactsPage() {
             <EmptyState title="No calls" subtitle="No call history with this contact." />
           ) : (
             <div>
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Timeline: {history[0]?.contactName || selectedPhone}
-                </h3>
-                <p className="text-xs text-slate-500">{history.length} calls</p>
+              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Timeline: {history[0]?.contactName || selectedPhone}
+                  </h3>
+                  <p className="text-xs text-slate-500">{history.length} calls</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {aiMessage && <span className="text-xs text-slate-500">{aiMessage}</span>}
+                  <Button
+                    variant="secondary"
+                    className="!px-3 !py-1.5 text-xs"
+                    disabled={aiBusy}
+                    onClick={() => aiCall(selectedPhone, history[0]?.contactName ?? undefined)}
+                    title="The AI agent calls this contact and logs the outcome here"
+                  >
+                    {aiBusy ? 'Dispatching…' : '🤖 AI call'}
+                  </Button>
+                </div>
               </div>
               <div className="divide-y divide-slate-100">
                 {history.map((call) => (

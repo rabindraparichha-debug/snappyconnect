@@ -6,7 +6,7 @@
  * call is placed; if it returns a dialUrl (Telnyx web dialer), we open it.
  */
 
-const DEFAULTS = { apiUrl: 'http://localhost:4000/api/v1' };
+const DEFAULTS = { apiUrl: 'https://call.snappyhires.com/api/v1' };
 
 async function getConfig() {
   const stored = await chrome.storage.sync.get(['apiUrl', 'token']);
@@ -44,7 +44,8 @@ async function handleCall(number) {
       const message = Array.isArray(data.message) ? data.message.join(', ') : data.message;
       return { ok: false, message: message || `Call failed (${res.status})` };
     }
-    // Telnyx users dial from the browser: open the web dialer pre-filled.
+    // Telnyx and UAE/Asterisk users dial from the browser: open the web
+    // dialer, which places the call to the candidate directly.
     if (data.action === 'client_dial' && data.dialUrl) {
       await chrome.tabs.create({ url: data.dialUrl });
     }

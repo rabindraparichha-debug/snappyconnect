@@ -70,6 +70,31 @@ export class UsersService {
       .getOne();
   }
 
+  /** Store a password-reset challenge (hash only) with its expiry. */
+  async setResetToken(id: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    await this.usersRepo.update(id, {
+      resetTokenHash: tokenHash,
+      resetExpiresAt: expiresAt,
+    });
+  }
+
+  async findByResetTokenHash(tokenHash: string): Promise<User | null> {
+    return this.usersRepo
+      .createQueryBuilder('user')
+      .addSelect(['user.resetTokenHash', 'user.resetExpiresAt'])
+      .where('user.resetTokenHash = :tokenHash', { tokenHash })
+      .getOne();
+  }
+
+  /** Set a new password and burn the reset challenge so the link can't reused. */
+  async setPassword(id: string, passwordHash: string): Promise<void> {
+    await this.usersRepo.update(id, {
+      passwordHash,
+      resetTokenHash: null,
+      resetExpiresAt: null,
+    });
+  }
+
   async update(id: string, dto: UpdateUserDto): Promise<User> {
     const user = await this.findById(id);
 

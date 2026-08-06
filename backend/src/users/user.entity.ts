@@ -21,6 +21,14 @@ export class User {
   @Column({ select: false })
   passwordHash?: string;
 
+  /** Password-reset link: only the hash is stored, so the DB can't be used to
+   * mint a working link. Cleared on use. */
+  @Column({ type: 'varchar', nullable: true, select: false })
+  resetTokenHash?: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true, select: false })
+  resetExpiresAt?: Date | null;
+
   @Column({ type: 'varchar', nullable: true })
   mobileNumber: string | null;
 
