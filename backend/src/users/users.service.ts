@@ -53,6 +53,33 @@ export class UsersService {
     };
   }
 
+  /**
+   * Serially auto-assign a free board-line IVR digit (1–9) to a USA user
+   * that has none, so the existing greeting menu ("press N for …") routes
+   * inbound callers to them. The greeting expands the live extension list
+   * automatically, so no other change is needed. Digits exhausted -> logged.
+   */
+  private async autoAssignIvrDigit(user: User): Promise<void> {
+    if (!(user.regions ?? []).includes(Region.USA)) return;
+    if (user.providerConfig?.ivrDigit) return;
+
+    const all = await this.usersRepo.find();
+    const taken = new Set<string>(
+      all
+        .filter((u) => u.id !== user.id)
+        .map((u) => (u.providerConfig?.ivrDigit ? String(u.providerConfig.ivrDigit) : null))
+        .filter(Boolean) as string[],
+    );
+    const digit = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].find(
+      (d) => !taken.has(d),
+    );
+    if (!digit) {
+      this.logger.warn(`All 9 IVR digits taken — ${user.email} not on the board menu`);
+      return;
+    }
+    user.providerConfig = { ...(user.providerConfig ?? {}), ivrDigit: digit };
+  }
+
   async create(dto: CreateUserDto): Promise<User> {
     const existing = await this.usersRepo.findOne({ where: { email: dto.email.toLowerCase() } });
     if (existing) throw new ConflictException('A user with this email already exists');
@@ -64,6 +91,7 @@ export class UsersService {
       passwordHash: await bcrypt.hash(password, 10),
     });
     await this.autoAssignSipLine(user);
+    await this.autoAssignIvrDigit(user);
     const saved = await this.usersRepo.save(user);
     return this.sanitize(saved);
   }
@@ -151,6 +179,7 @@ export class UsersService {
     // Granting UAE access to an existing user picks up a line the same way
     // creation does.
     await this.autoAssignSipLine(user);
+    await this.autoAssignIvrDigit(user);
     const saved = await this.usersRepo.save(user);
     return this.sanitize(saved);
   }
