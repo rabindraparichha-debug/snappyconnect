@@ -4,6 +4,10 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>SnappyConnect uses the microphone for VoIP calls.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>SnappyConnect does not use the camera; this permission is required by the calling engine and is never requested.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>SnappyConnect can route call audio to Bluetooth headsets.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>tel</string>
