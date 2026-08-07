@@ -1,4 +1,13 @@
-import { Body, Controller, Headers, HttpCode, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Post,
+  RawBodyRequest,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -22,12 +31,22 @@ export class AiCallsController {
     return this.aiCalls.dispatch(user, dto);
   }
 
-  /** Voice-agent callback: events and final results. Shared-secret auth. */
+  /** Voice-platform callback: events and final results, HMAC-signed. */
   @Public()
   @SkipThrottle()
   @Post('result')
   @HttpCode(200)
-  result(@Headers('x-cron-secret') secret: string | undefined, @Body() payload: any) {
-    return this.aiCalls.handleAgentCallback(secret, payload);
+  result(
+    @Headers('x-vp-signature') signature: string | undefined,
+    @Headers('x-vp-timestamp') timestamp: string | undefined,
+    @Req() req: RawBodyRequest<Request>,
+    @Body() payload: any,
+  ) {
+    return this.aiCalls.handleAgentCallback(
+      signature,
+      timestamp,
+      req.rawBody,
+      payload,
+    );
   }
 }

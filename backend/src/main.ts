@@ -5,7 +5,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody is required to verify HMAC signatures on inbound webhooks — the
+  // signature covers the exact bytes sent, which JSON re-serialisation breaks.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   // CloudPanel's nginx sits in front of us, so without this every request
   // reports the proxy's IP — rate limits would then be shared by all users

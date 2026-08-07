@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import {
   CallDirection,
   CallSource,
@@ -36,9 +36,9 @@ const REGION_TRUNKS: Partial<Record<Region, string>> = {
 @Injectable()
 export class AiCallsService {
   private readonly logger = new Logger(AiCallsService.name);
-  private readonly agentUrl: string;
-  private readonly agentSecret: string;
-  private readonly publicApiUrl: string;
+  private readonly platformUrl: string;
+  private readonly platformKey: string;
+  private readonly webhookSecret: string;
 
   constructor(
     private readonly dncService: DncService,
@@ -48,12 +48,12 @@ export class AiCallsService {
     private readonly usersRepo: Repository<User>,
     config: ConfigService,
   ) {
-    this.agentUrl = config.get<string>('VOICE_AGENT_URL', 'http://127.0.0.1:8091');
-    this.agentSecret = config.get<string>('VOICE_AGENT_SECRET', '');
-    this.publicApiUrl = config.get<string>(
-      'PUBLIC_API_URL',
-      'https://call.snappyhires.com/api/v1',
+    this.platformUrl = config.get<string>(
+      'VOICE_PLATFORM_URL',
+      'https://voice.snappyhires.com',
     );
+    this.platformKey = config.get<string>('VOICE_PLATFORM_KEY', '');
+    this.webhookSecret = config.get<string>('VOICE_PLATFORM_WEBHOOK_SECRET', '');
   }
 
   /** Hand a call to the AI voice agent and log it as an in-flight call. */
@@ -97,37 +97,46 @@ export class AiCallsService {
       }),
     );
 
+    if (!this.platformKey) {
+      await this.markFailed(log.id, 'Voice platform key not configured');
+      throw new ServiceUnavailableException(
+        'AI calling is not configured. Ask an admin to set VOICE_PLATFORM_KEY.',
+      );
+    }
+
+    // The platform picks the trunk from the number's prefix and returns its
+    // own call id; `metadata` comes back on every webhook, so it carries the
+    // link to our call log rather than us keeping a side table.
     const body = {
-      taskId,
       phone,
-      trunk,
-      contactName: dto.contactName,
-      companyName: dto.companyName,
-      goalPrompt: dto.goalPrompt,
-      scriptTemplate: dto.scriptTemplate,
-      resultWebhookUrl: `${this.publicApiUrl}/ai-calls/result`,
+      contact_name: dto.contactName,
+      company_name: dto.companyName,
+      goal_prompt: dto.goalPrompt,
+      script_template: dto.scriptTemplate,
+      metadata: { taskId, callLogId: log.id },
     };
 
     let res: Response;
     try {
-      res = await fetch(`${this.agentUrl}/dispatch`, {
+      res = await fetch(`${this.platformUrl}/v1/calls`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-cron-secret': this.agentSecret,
+          Authorization: `Bearer ${this.platformKey}`,
         },
         body: JSON.stringify(body),
       });
     } catch {
-      await this.markFailed(log.id, 'Voice agent unreachable');
+      await this.markFailed(log.id, 'Voice platform unreachable');
       throw new ServiceUnavailableException(
-        'The AI voice agent is not reachable. Check that it is running.',
+        'The AI voice platform is not reachable.',
       );
     }
     if (!res.ok) {
-      await this.markFailed(log.id, `Voice agent refused (${res.status})`);
+      const detail = await res.text().catch(() => '');
+      await this.markFailed(log.id, `Voice platform refused (${res.status})`);
       throw new ServiceUnavailableException(
-        `The AI voice agent refused the call (${res.status}).`,
+        `The AI voice platform refused the call (${res.status}). ${detail.slice(0, 200)}`,
       );
     }
 
@@ -140,33 +149,52 @@ export class AiCallsService {
   }
 
   /**
-   * Callback target for the voice agent: mid-call events ({taskId, event})
-   * and the final result land on the same URL.
+   * Callback target for the voice platform: `call.answered` mid-call and
+   * `call.completed` at the end, both signed with our webhook secret.
    */
-  async handleAgentCallback(secret: string | undefined, payload: any) {
-    if (!this.agentSecret) {
-      throw new ServiceUnavailableException('VOICE_AGENT_SECRET is not configured');
+  async handleAgentCallback(
+    signature: string | undefined,
+    timestamp: string | undefined,
+    rawBody: Buffer | undefined,
+    payload: any,
+  ) {
+    if (!this.webhookSecret) {
+      throw new ServiceUnavailableException(
+        'VOICE_PLATFORM_WEBHOOK_SECRET is not configured',
+      );
     }
-    if (secret !== this.agentSecret) {
+    if (!signature || !timestamp || !rawBody) throw new UnauthorizedException();
+    // Reject replays outside a 5-minute window before touching the payload.
+    if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {
       throw new UnauthorizedException();
     }
-    const taskId: string | undefined = payload?.taskId;
-    if (!taskId) throw new BadRequestException('taskId required');
+    const expected = createHmac('sha256', this.webhookSecret)
+      .update(`${timestamp}.`)
+      .update(rawBody)
+      .digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(signature);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new UnauthorizedException();
+    }
+
+    const taskId: string | undefined = payload?.metadata?.taskId;
+    if (!taskId) throw new BadRequestException('metadata.taskId required');
 
     const log = await this.callLogsRepo
       .createQueryBuilder('log')
       .where(`log.metadata ->> 'taskId' = :taskId`, { taskId })
       .getOne();
     if (!log) {
-      this.logger.warn(`Agent callback for unknown task ${taskId}`);
+      this.logger.warn(`Platform callback for unknown task ${taskId}`);
       return { received: true };
     }
 
-    // Mid-call event
-    if (payload.event) {
-      if (payload.event === 'answered') {
-        await this.callLogsRepo.update(log.id, { status: CallStatus.ANSWERED });
-      }
+    if (payload.event === 'call.answered') {
+      await this.callLogsRepo.update(log.id, { status: CallStatus.ANSWERED });
+      return { received: true };
+    }
+    if (payload.event && payload.event !== 'call.completed') {
       return { received: true };
     }
 
@@ -180,16 +208,18 @@ export class AiCallsService {
           : CallStatus.COMPLETED;
 
     log.status = status;
-    log.durationSeconds = Number(payload.durationSec) || 0;
-    log.startedAt = payload.startedAt ? new Date(payload.startedAt) : log.startedAt;
-    log.endedAt = payload.endedAt ? new Date(payload.endedAt) : null;
+    log.durationSeconds = Number(payload.duration_sec) || 0;
+    log.endedAt = new Date();
     log.metadata = {
       ...(log.metadata ?? {}),
       outcome,
       summary: payload.summary ?? null,
-      meetingTime: payload.meetingTime ?? null,
-      callbackTime: payload.callbackTime ?? null,
-      transcript: parseTranscript(payload.transcript),
+      meetingTime: payload.meeting_time ?? null,
+      callbackTime: payload.callback_time ?? null,
+      // The platform sends the transcript as an array, not a JSON string.
+      transcript: Array.isArray(payload.transcript)
+        ? payload.transcript.slice(0, 500)
+        : null,
     };
     await this.callLogsRepo.save(log);
 
@@ -229,15 +259,4 @@ function toE164Usa(n: string): string {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
   return `+${digits}`;
-}
-
-/** The agent sends the transcript as a JSON string; keep it bounded. */
-function parseTranscript(raw: unknown): unknown[] | null {
-  if (typeof raw !== 'string') return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.slice(0, 500) : null;
-  } catch {
-    return null;
-  }
 }

@@ -58,12 +58,13 @@ ASTERISK_AMI_HOST=127.0.0.1
 ASTERISK_AMI_PORT=5038
 ASTERISK_AMI_USERNAME=snappyconnect
 ASTERISK_AMI_PASSWORD=${AMI_PASSWORD:-}
-# AI voice agent (shared internal service on this host). The secret is
-# mirrored from the agent's own env at deploy time so the two never drift;
-# it is read server-side and never leaves the box.
+# AI voice platform (multi-tenant service on the dedicated voice box).
+# SnappyConnect is a tenant: the key authorises dispatch, the webhook secret
+# verifies signed result callbacks.
 PUBLIC_API_URL=$PUBLIC_API_URL
-VOICE_AGENT_URL=http://127.0.0.1:8091
-VOICE_AGENT_SECRET=$(grep -s '^CRON_SECRET=' /var/www/snappyhires-crm/voice-agent/.env | cut -d= -f2-)
+VOICE_PLATFORM_URL=https://voice.snappyhires.com
+VOICE_PLATFORM_KEY=${VOICE_PLATFORM_KEY:-}
+VOICE_PLATFORM_WEBHOOK_SECRET=${VOICE_PLATFORM_WEBHOOK_SECRET:-}
 # Transactional email (password resets) — reuse the CRM's Resend key.
 RESEND_API_KEY=$(grep -s '^RESEND_API_KEY=' /var/www/snappyhires-crm/.env | cut -d= -f2-)
 MAIL_FROM=${MAIL_FROM:-SnappyConnect <onboarding@resend.dev>}
