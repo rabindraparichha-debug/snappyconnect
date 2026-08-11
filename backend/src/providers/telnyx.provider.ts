@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider } from '../common/enums';
+import { toUsE164 } from '../common/phone.util';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
 import {
@@ -112,7 +113,13 @@ export class TelnyxProvider implements CallingProviderStrategy {
       );
     }
 
-    const payload: Record<string, any> = { from: cfg.fromNumber, to, text: body };
+    // The admin-configured from number may be stored without +1; Telnyx
+    // rejects either side when it's not E.164.
+    const payload: Record<string, any> = {
+      from: toUsE164(String(cfg.fromNumber), 'sending number (Settings → Telnyx "From number")'),
+      to: toUsE164(to),
+      text: body,
+    };
     if (cfg.messagingProfileId) payload.messaging_profile_id = cfg.messagingProfileId;
 
     const res = await fetch(`${TELNYX_API}/messages`, {
