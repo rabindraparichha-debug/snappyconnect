@@ -93,6 +93,28 @@ export class TelnyxProvisioningService {
     await this.usersRepo.save(user);
   }
 
+  /** Every number on the Telnyx account with the recruiter (if any) holding it. */
+  async numberOverview(): Promise<
+    Array<{ phoneNumber: string; assignedTo: { id: string; name: string; email: string } | null }>
+  > {
+    const [numbers, users] = await Promise.all([
+      this.telnyx.listNumbers(),
+      this.usersRepo.find(),
+    ]);
+    const byNumber = new Map(
+      users
+        .filter((u) => u.providerConfig?.telnyxNumber)
+        .map((u) => [u.providerConfig!.telnyxNumber as string, u]),
+    );
+    return numbers.map((n) => {
+      const owner = byNumber.get(n.phoneNumber);
+      return {
+        phoneNumber: n.phoneNumber,
+        assignedTo: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+      };
+    });
+  }
+
   /** Numbers on the account that are not yet assigned to any recruiter. */
   async availableNumbers(): Promise<string[]> {
     const [numbers, users] = await Promise.all([
