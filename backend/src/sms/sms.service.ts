@@ -33,16 +33,17 @@ export class SmsService {
       );
     }
 
+    const to = this.toE164(dto.to);
     const log = this.smsRepo.create({
       userId: user.id,
-      phoneNumber: dto.to,
+      phoneNumber: to,
       direction: SmsDirection.OUTBOUND,
       body: dto.body,
       status: SmsStatus.QUEUED,
     });
 
     try {
-      const { externalId } = await this.telnyxProvider.sendSms(dto.to, dto.body);
+      const { externalId } = await this.telnyxProvider.sendSms(to, dto.body);
       log.externalId = externalId;
       log.status = SmsStatus.SENT;
     } catch (err) {
@@ -51,8 +52,28 @@ export class SmsService {
       throw err;
     }
     const saved = await this.smsRepo.save(log);
-    this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${dto.to}`, user.id, saved.id).catch(() => {});
+    this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${to}`, user.id, saved.id).catch(() => {});
     return saved;
+  }
+
+  /**
+   * Telnyx only accepts E.164 ("+18475960149"), but numbers in the UI come
+   * from call history and manual entry as bare 10-digit US numbers, often
+   * with spaces or dashes. SMS runs on the USA line, so +1 is the default
+   * country code for bare numbers.
+   */
+  private toE164(raw: string): string {
+    const hasPlus = raw.trim().startsWith('+');
+    const digits = raw.replace(/\D/g, '');
+    if (hasPlus) {
+      if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+    } else {
+      if (digits.length === 10) return `+1${digits}`;
+      if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    }
+    throw new BadRequestException(
+      `"${raw}" is not a valid phone number. Use a 10-digit US number or the full international format (+1...).`,
+    );
   }
 
   /**
