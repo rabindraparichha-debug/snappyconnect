@@ -19,6 +19,7 @@ const NAV = [
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
   { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },
+  { href: '/numbers', label: 'Numbers', icon: PhoneNumberIcon, adminOnly: true },
   { href: '/users', label: 'Users', icon: UsersIcon, adminOnly: true },
   { href: '/audit', label: 'Audit Log', icon: ShieldIcon, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true },
@@ -159,6 +160,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function PhoneNumberIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5M9 3.75L7.5 20.25m9-16.5l-1.5 16.5" />
+    </svg>
+  );
+}
 function HomeIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
