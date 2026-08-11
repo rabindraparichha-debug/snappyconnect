@@ -51,7 +51,8 @@ export class SmsService {
       log.status = SmsStatus.FAILED;
       log.error = friendlyTelnyxError(err);
       await this.smsRepo.save(log);
-      throw err;
+      // Re-throw the readable reason, not the raw Telnyx JSON blob.
+      throw new BadRequestException(`Could not send to ${to}: ${log.error}`);
     }
     const saved = await this.smsRepo.save(log);
     this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${to}`, user.id, saved.id).catch(() => {});
@@ -205,6 +206,15 @@ export class SmsService {
  * out the human-readable detail so the UI can show why a message failed
  * instead of the raw JSON blob.
  */
+/** Plain-English guidance for Telnyx error codes recruiters actually hit. */
+const TELNYX_ERROR_HINTS: Record<string, string> = {
+  '10002':
+    'This is not a real, reachable phone number — check the digits (the area code may not exist), or add the country code (e.g. +371...) if it is an international number.',
+  '40010': 'US carriers require 10DLC registration for this number — register the brand/campaign in the Telnyx portal.',
+  '40011': 'US carriers require 10DLC registration for this number — register the brand/campaign in the Telnyx portal.',
+  '40310': 'The phone number is not in a valid format.',
+};
+
 function friendlyTelnyxError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const jsonStart = message.indexOf('{');
@@ -212,7 +222,11 @@ function friendlyTelnyxError(err: unknown): string {
     try {
       const parsed = JSON.parse(message.slice(jsonStart));
       const details = (parsed?.errors ?? [])
-        .map((e: any) => e?.detail ?? e?.title)
+        .map((e: any) => {
+          const base = e?.detail ?? e?.title;
+          const hint = TELNYX_ERROR_HINTS[String(e?.code)];
+          return hint ? `${base} ${hint}` : base;
+        })
         .filter(Boolean)
         .join('; ');
       if (details) return details;
