@@ -1,0 +1,54 @@
+# Deploy SnappyConnect (backend + web) to the Hostinger VPS from GitHub Actions.
+#
+# Mirrors deploy/deploy.sh, but reuses the .env files already on the server —
+# it never generates or overwrites secrets, so it is safe to run from CI.
+# First-time provisioning must still be done once via deploy/deploy.sh.
+#
+# One-time setup: add a repository secret named VPS_SSH_KEY containing the
+# private key that is authorized on the server (the contents of
+# ~/.ssh/snappyconnect_vps): repo Settings -> Secrets and variables ->
+# Actions -> New repository secret.
+#
+# Runs automatically on every push to main, or on demand from the Actions tab
+# ("Run workflow"), where you can pick any branch to deploy.
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+env:
+  VPS_IP: 145.223.18.237
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H "$VPS_IP" >> ~/.ssh/known_hosts
+
+      - name: Sync code to server
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/vps_key" \
+            --exclude node_modules --exclude dist --exclude .next \
+            --exclude .env --exclude .env.local --exclude tsconfig.tsbuildinfo \
+            backend web "root@$VPS_IP:/opt/snappyconnect/"
+          rsync -az -e "ssh -i ~/.ssh/vps_key" \
+            deploy/server-update.sh "root@$VPS_IP:/opt/snappyconnect/"
+
+      - name: Build and restart on server
+        run: ssh -i ~/.ssh/vps_key "root@$VPS_IP" "bash /opt/snappyconnect/server-update.sh"
+
+      - name: Health check
+        run: curl -fsS "http://$VPS_IP:4000/api/v1/health"
