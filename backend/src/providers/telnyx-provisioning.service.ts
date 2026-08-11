@@ -44,7 +44,7 @@ export class TelnyxProvisioningService {
 
     const number = phoneNumber ?? (await this.telnyx.purchaseNumber(areaCode));
     const safeName = user.email.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
-    const connection = await this.telnyx.createCredentialConnection(`snappy-${safeName}`);
+    const connection = await this.getOrCreateConnection(`snappy-${safeName}`);
     const credential = await this.telnyx.createTelephonyCredential(
       connection.id,
       `snappy-${safeName}`,
@@ -61,6 +61,26 @@ export class TelnyxProvisioningService {
     this.logger.log(`Provisioned ${number} for ${user.email}`);
 
     return { phoneNumber: number, connectionId: connection.id, credentialId: credential.id };
+  }
+
+  /**
+   * Telnyx connection names are account-unique, and removeDirectLine leaves the
+   * connection behind on Telnyx — so re-provisioning the same user must reuse
+   * it rather than create a duplicate (error 10015). The suffixed retry covers
+   * a create/lookup race or a lookup that missed.
+   */
+  private async getOrCreateConnection(name: string): Promise<{ id: string }> {
+    const existing = await this.telnyx.findCredentialConnectionByName(name);
+    if (existing) {
+      this.logger.log(`Reusing existing Telnyx connection "${name}" (${existing.id})`);
+      return existing;
+    }
+    try {
+      return await this.telnyx.createCredentialConnection(name);
+    } catch (err) {
+      if (!(err as Error).message?.includes('10015')) throw err;
+      return this.telnyx.createCredentialConnection(`${name}-${Date.now().toString(36)}`);
+    }
   }
 
   /** Frees the number from the user (the number itself stays on the account). */
