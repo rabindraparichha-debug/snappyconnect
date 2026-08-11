@@ -39,6 +39,10 @@ export class SmsLog {
   @Column({ type: 'varchar', nullable: true })
   externalId: string | null;
 
+  /** Why the message failed (Telnyx error detail), shown in the UI. */
+  @Column({ type: 'text', nullable: true })
+  error: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

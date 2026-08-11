@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { toUsE164 } from '../common/phone.util';
 import { ActivityService } from '../activity/activity.service';
 import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -33,7 +34,7 @@ export class SmsService {
       );
     }
 
-    const to = this.toE164(dto.to);
+    const to = toUsE164(dto.to);
     const log = this.smsRepo.create({
       userId: user.id,
       phoneNumber: to,
@@ -48,6 +49,7 @@ export class SmsService {
       log.status = SmsStatus.SENT;
     } catch (err) {
       log.status = SmsStatus.FAILED;
+      log.error = friendlyTelnyxError(err);
       await this.smsRepo.save(log);
       throw err;
     }
@@ -56,25 +58,6 @@ export class SmsService {
     return saved;
   }
 
-  /**
-   * Telnyx only accepts E.164 ("+18475960149"), but numbers in the UI come
-   * from call history and manual entry as bare 10-digit US numbers, often
-   * with spaces or dashes. SMS runs on the USA line, so +1 is the default
-   * country code for bare numbers.
-   */
-  private toE164(raw: string): string {
-    const hasPlus = raw.trim().startsWith('+');
-    const digits = raw.replace(/\D/g, '');
-    if (hasPlus) {
-      if (digits.length >= 8 && digits.length <= 15) return `+${digits}`;
-    } else {
-      if (digits.length === 10) return `+1${digits}`;
-      if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-    }
-    throw new BadRequestException(
-      `"${raw}" is not a valid phone number. Use a 10-digit US number or the full international format (+1...).`,
-    );
-  }
 
   /**
    * Telnyx message webhook: store inbound SMS and reconcile outbound delivery
@@ -131,6 +114,10 @@ export class SmsService {
     if (status === 'delivered') log.status = SmsStatus.DELIVERED;
     else if (['sending_failed', 'delivery_failed', 'failed'].includes(status ?? '')) {
       log.status = SmsStatus.FAILED;
+      const errors = Array.isArray(payload.errors) ? payload.errors : [];
+      log.error =
+        errors.map((e: any) => e?.detail ?? e?.title).filter(Boolean).join('; ') ||
+        `Carrier reported: ${status}`;
     }
     await this.smsRepo.save(log);
   }
@@ -211,4 +198,27 @@ export class SmsService {
       );
     }
   }
+}
+
+/**
+ * Telnyx failures arrive as 'Telnyx SMS failed (4xx): {"errors":[...]}'. Pull
+ * out the human-readable detail so the UI can show why a message failed
+ * instead of the raw JSON blob.
+ */
+function friendlyTelnyxError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const jsonStart = message.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(message.slice(jsonStart));
+      const details = (parsed?.errors ?? [])
+        .map((e: any) => e?.detail ?? e?.title)
+        .filter(Boolean)
+        .join('; ');
+      if (details) return details;
+    } catch {
+      // fall through to the raw message
+    }
+  }
+  return message.slice(0, 500);
 }
