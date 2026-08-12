@@ -22,6 +22,7 @@ export default function NumbersPage() {
 
   const [buyUserId, setBuyUserId] = useState('');
   const [areaCode, setAreaCode] = useState('332');
+  const [repairResult, setRepairResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -77,6 +78,28 @@ export default function NumbersPage() {
     }
   }
 
+  async function repairLines() {
+    setBusy('repair');
+    setError(null);
+    setRepairResult(null);
+    try {
+      const result = await api<{ checked: number; repaired: number; failed: string[] }>(
+        '/users/telnyx/repair-lines',
+        { method: 'POST' },
+      );
+      const failures = result.failed.length ? ` Failed: ${result.failed.join('; ')}` : '';
+      setRepairResult(
+        result.repaired > 0
+          ? `Fixed outbound calling on ${result.repaired} of ${result.checked} direct lines.${failures}`
+          : `All ${result.checked} direct lines already have outbound calling enabled.${failures}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Repair failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function buy() {
     if (!buyUserId) return;
     const user = users.find((u) => u.id === buyUserId);
@@ -104,7 +127,16 @@ export default function NumbersPage() {
             Telnyx numbers on the account — assign direct lines to recruiters or buy new ones.
           </p>
         </div>
+        <Button variant="secondary" onClick={repairLines} disabled={busy === 'repair'}>
+          {busy === 'repair' ? 'Checking lines…' : 'Fix outbound calling'}
+        </Button>
       </div>
+
+      {repairResult && (
+        <div className="mt-4 rounded-lg bg-emerald-50 px-4 py-3">
+          <p className="text-sm font-medium text-emerald-700">{repairResult}</p>
+        </div>
+      )}
 
       {error && (
         <div className="mt-4 rounded-lg bg-rose-50 px-4 py-3">

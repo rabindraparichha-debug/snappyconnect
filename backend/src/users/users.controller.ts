@@ -65,6 +65,15 @@ export class UsersController {
     return this.provisioning.numberOverview();
   }
 
+  /**
+   * Attach the outbound voice profile to direct-line connections missing one.
+   * Lines provisioned before the fix couldn't place outbound calls at all.
+   */
+  @Post('telnyx/repair-lines')
+  repairLines() {
+    return this.provisioning.repairDirectLines();
+  }
+
   @Post()
   async create(@CurrentUser() actor: User, @Ip() ip: string, @Body() dto: CreateUserDto) {
     const created = await this.usersService.create(dto);

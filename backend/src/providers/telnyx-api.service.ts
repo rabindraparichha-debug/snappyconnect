@@ -61,18 +61,52 @@ export class TelnyxApiService {
   }
 
   /** Credential connection dedicated to one user, so their number can ring them. */
-  async createCredentialConnection(name: string): Promise<{ id: string }> {
+  async createCredentialConnection(
+    name: string,
+    outboundVoiceProfileId?: string,
+  ): Promise<{ id: string }> {
     const data = await this.request<any>('/credential_connections', {
       method: 'POST',
       body: {
         connection_name: name,
         user_name: `sc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
         password: this.randomSecret(),
+        // Without an outbound voice profile Telnyx rejects every outbound
+        // call on the connection — inbound rings, outbound never completes.
+        ...(outboundVoiceProfileId
+          ? { outbound: { outbound_voice_profile_id: outboundVoiceProfileId } }
+          : {}),
         // Browsers register over WSS; encrypted media keeps Chrome happy.
         webhook_event_url: undefined,
       },
     });
     return { id: String(data?.data?.id) };
+  }
+
+  /** The outbound voice profile attached to a credential connection, if any. */
+  async getConnectionOutboundVoiceProfileId(connectionId: string): Promise<string | null> {
+    const data = await this.request<any>(
+      `/credential_connections/${encodeURIComponent(connectionId)}`,
+    );
+    const id = data?.data?.outbound?.outbound_voice_profile_id;
+    return id ? String(id) : null;
+  }
+
+  async setConnectionOutboundVoiceProfile(
+    connectionId: string,
+    outboundVoiceProfileId: string,
+  ): Promise<void> {
+    await this.request(`/credential_connections/${encodeURIComponent(connectionId)}`, {
+      method: 'PATCH',
+      body: { outbound: { outbound_voice_profile_id: outboundVoiceProfileId } },
+    });
+  }
+
+  /** First outbound voice profile on the account, if one exists. */
+  async firstOutboundVoiceProfileId(): Promise<string | null> {
+    const data = await this.request<any>('/outbound_voice_profiles?page[size]=1');
+    const id = data?.data?.[0]?.id;
+    return id ? String(id) : null;
   }
 
   async createTelephonyCredential(connectionId: string, name: string): Promise<{ id: string }> {
