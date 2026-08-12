@@ -24,6 +24,7 @@ const NAV = [
   { href: '/recordings', label: 'Recordings', icon: MicIcon, adminOnly: true },
   { href: '/audit', label: 'Audit Log', icon: ShieldIcon, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true },
+  { href: '/apps', label: 'Get the Apps', icon: DownloadIcon, adminOnly: false },
   { href: '/profile', label: 'Profile', icon: UserIcon, adminOnly: false },
 ];
 
@@ -168,6 +169,14 @@ function HomeIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" />
+    </svg>
+  );
+}
+
 function ClockIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
