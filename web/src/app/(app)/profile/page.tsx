@@ -92,6 +92,46 @@ export default function ProfilePage() {
       </Card>
 
       <Card className="mt-6 p-6">
+        <h2 className="text-base font-semibold text-slate-900">My Numbers &amp; Lines</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          What candidates see when you call, and how calls reach you.
+        </p>
+        <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {user.regions?.includes('usa') && (
+            <>
+              <ProfileField
+                label="USA Direct Line"
+                value={
+                  user.providerConfig?.telnyxNumber ??
+                  'Shared company number (ask an admin for a personal line)'
+                }
+              />
+              <ProfileField
+                label="Board-Line Extension"
+                value={
+                  user.providerConfig?.ivrDigit
+                    ? `Callers press ${user.providerConfig.ivrDigit} to reach you`
+                    : '—'
+                }
+              />
+            </>
+          )}
+          {user.regions?.includes('uae') && (
+            <ProfileField
+              label="UAE Extension"
+              value={user.providerConfig?.sipUsername ?? 'Not assigned — contact an admin'}
+            />
+          )}
+          {user.regions?.includes('india') && (
+            <ProfileField label="India" value="Calls use your own phone (native dialer)" />
+          )}
+          {!user.regions?.length && (
+            <ProfileField label="Calling Access" value="No regions assigned yet" />
+          )}
+        </dl>
+      </Card>
+
+      <Card className="mt-6 p-6">
         <h2 className="text-base font-semibold text-slate-900">Change Password</h2>
         <form onSubmit={changePassword} className="mt-4 space-y-4">
           <div>

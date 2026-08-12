@@ -18,6 +18,30 @@ type DialState =
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 
+/**
+ * Turn a getUserMedia failure into an instruction a recruiter can act on.
+ * "Blocked" and "no microphone plugged in" need opposite fixes, and a bare
+ * "access required" sends people to re-grant a permission they already have.
+ */
+function describeMicError(err: unknown): string {
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No microphone found — plug one in (or connect a headset) and try again.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Your microphone is in use by another app (Zoom, Teams…). Close it and try again.';
+  }
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return 'Your microphone could not be opened. Pick a different input under the padlock in the address bar, or reconnect your headset.';
+  }
+  // Chrome raises NotAllowedError both when the site permission is denied and
+  // when the browser itself lacks OS-level microphone access.
+  return (
+    'Microphone blocked. Allow it from the padlock in the address bar, and check that your ' +
+    `browser has microphone access in system privacy settings. (${name || 'unknown error'})`
+  );
+}
+
 interface CallScript {
   id: string;
   title: string;
@@ -47,6 +71,56 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const isSipCallRef = useRef(false);
+  const [micState, setMicState] = useState<'unknown' | 'granted' | 'prompt' | 'denied'>('unknown');
+
+  // Know the microphone situation the moment the dialer opens, and track it
+  // live, so problems surface as a banner before the first call — not as a
+  // dead-sounding call.
+  useEffect(() => {
+    let status: PermissionStatus | undefined;
+    (async () => {
+      try {
+        status = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+        if (!status) return;
+        const apply = () => setMicState(status!.state as 'granted' | 'prompt' | 'denied');
+        apply();
+        status.onchange = apply;
+      } catch {
+        // Permissions API unsupported (Safari): the pre-call check still runs.
+      }
+    })();
+    return () => {
+      if (status) status.onchange = null;
+    };
+  }, []);
+
+  /**
+   * Get a working microphone (with device fallback) or throw with an
+   * actionable message. Shared by every call path and the enable banner.
+   */
+  async function ensureMicrophone(): Promise<string | undefined> {
+    try {
+      const { acquireMicrophone } = await import('@/lib/sip-client');
+      const deviceId = await acquireMicrophone();
+      setMicState('granted');
+      return deviceId;
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') setMicState('denied');
+      throw new Error(describeMicError(err));
+    }
+  }
+
+  async function enableMicClicked() {
+    setMessage('');
+    try {
+      await ensureMicrophone();
+      setMessage('Microphone ready — you can place calls.');
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error ? err.message : 'Microphone unavailable');
+    }
+  }
   const recorderRef = useRef<CallRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -178,37 +252,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     isSipCallRef.current = true;
 
     try {
-      let micDeviceId: string | undefined;
-      try {
-        const { acquireMicrophone } = await import('@/lib/sip-client');
-        micDeviceId = await acquireMicrophone();
-      } catch (err) {
-        // Say which failure this is: "blocked" and "no microphone plugged in"
-        // need opposite fixes, and a bare "access required" sends people to
-        // re-grant a permission they already granted.
-        const name = err instanceof Error ? err.name : '';
-        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          throw new Error('No microphone found — plug one in and try again.');
-        }
-        if (name === 'NotReadableError' || name === 'TrackStartError') {
-          throw new Error('Your microphone is in use by another app. Close it and try again.');
-        }
-        if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-          throw new Error(
-            'Your microphone could not be opened. Pick a different input under the padlock ' +
-              'in the address bar, or reconnect your headset, then press Call.',
-          );
-        }
-        // Chrome raises NotAllowedError both when the site permission is
-        // denied and when the browser app itself lacks microphone access from
-        // the operating system — the site shows "Allow" in that second case,
-        // so point at both. The raw name is kept for support.
-        throw new Error(
-          'Microphone blocked. Check the padlock in the address bar, and that your browser ' +
-            'is allowed the microphone in your system privacy settings. ' +
-            `(${name || 'unknown error'})`,
-        );
-      }
+      const micDeviceId = await ensureMicrophone();
 
       setMessage('Connecting to your SIP line…');
       const { placeSipCall } = await import('@/lib/sip-client');
@@ -278,12 +322,10 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     setMessage('Requesting microphone access…');
     dialStartedAtRef.current = new Date().toISOString();
     try {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        // mic prompt may fail in some browsers; Telnyx SDK will retry internally
-      }
+      // A failed microphone must stop the call with a real explanation —
+      // swallowing it here produced instant dead calls logged as no_answer,
+      // with the recruiter never told why.
+      await ensureMicrophone();
 
       setMessage('Connecting to Telnyx…');
       const client = await getTelnyxClient();
@@ -422,6 +464,23 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   return (
     <div className="w-full">
       <audio ref={audioRef} autoPlay />
+
+      {micState === 'prompt' && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          <span>Calls need your microphone.</span>
+          <Button onClick={enableMicClicked} className="!px-3 !py-1.5 text-xs shrink-0">
+            Enable microphone
+          </Button>
+        </div>
+      )}
+      {micState === 'denied' && (
+        <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
+          Microphone access is blocked, so calls can&apos;t work. Click the padlock in the
+          address bar → allow Microphone, then reload. On Mac also check System Settings →
+          Privacy &amp; Security → Microphone for your browser.
+        </div>
+      )}
+
       <div className="mb-3">
         <Input
           type="tel"
