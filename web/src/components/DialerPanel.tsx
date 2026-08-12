@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
+import { isUsNumber, toUsE164 } from '@/lib/phone';
 import { getFromNumber, getTelnyxClient } from '@/lib/telnyx-client';
 import type { InitiateCallResult } from '@/lib/types';
 import { Button, Input, cn } from '@/components/ui';
@@ -93,8 +94,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   function shouldUseTelnyx(target: string): boolean {
     if (user?.provider === 'telnyx') return true;
     const usaAccess = user?.regions?.includes('usa');
-    const n = target.replace(/[\s\-().]/g, '');
-    return Boolean(usaAccess) && (n.startsWith('+1') || /^1\d{10}$/.test(n));
+    return Boolean(usaAccess) && isUsNumber(target);
   }
 
   async function placeCall() {
@@ -234,7 +234,10 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     isSipCallRef.current = false;
   }
 
-  async function placeTelnyxCall(target: string) {
+  async function placeTelnyxCall(typed: string) {
+    // Telnyx rejects anything that isn't E.164 — the same failure the SMS
+    // path had. Dial and log the normalized form.
+    const target = toUsE164(typed);
     setState('connecting');
     setMessage('Requesting microphone access…');
     dialStartedAtRef.current = new Date().toISOString();
@@ -307,8 +310,20 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       ? Math.floor((Date.now() - (answeredAtRef.current as number)) / 1000)
       : 0;
 
-    setState('ended');
-    setMessage(answered ? `Call ended (${duration}s)` : 'Call ended — not answered');
+    // Telnyx reports why an unanswered call ended (busy, rejected caller ID,
+    // invalid number, …) — showing "not answered" for those hides real
+    // failures from the recruiter.
+    const cause: string | undefined = callRef.current?.cause;
+    const failed =
+      !answered && !!cause && !['NORMAL_CLEARING', 'ORIGINATOR_CANCEL', 'PURGE'].includes(cause);
+
+    if (failed) {
+      setState('error');
+      setMessage(telnyxCauseMessage(cause));
+    } else {
+      setState('ended');
+      setMessage(answered ? `Call ended (${duration}s)` : 'Call ended — not answered');
+    }
 
     const externalId =
       callRef.current?.telnyxIDs?.telnyxLegId ?? callRef.current?.id ?? undefined;
@@ -319,7 +334,13 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
         body: {
           phoneNumber: target,
           direction: 'outbound',
-          status: answered ? 'completed' : 'no_answer',
+          status: answered
+            ? 'completed'
+            : cause === 'USER_BUSY'
+              ? 'busy'
+              : failed
+                ? 'failed'
+                : 'no_answer',
           durationSeconds: duration,
           startedAt: dialStartedAtRef.current ?? undefined,
           endedAt: new Date().toISOString(),
@@ -471,6 +492,20 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       )}
     </div>
   );
+}
+
+function telnyxCauseMessage(cause: string): string {
+  switch (cause) {
+    case 'USER_BUSY':
+      return 'The line is busy.';
+    case 'CALL_REJECTED':
+      return 'The carrier rejected the call — usually the caller ID number is missing or not a Telnyx number (Settings → Telnyx, or your assigned direct number).';
+    case 'UNALLOCATED_NUMBER':
+    case 'INVALID_NUMBER_FORMAT':
+      return 'That number is not valid or cannot be reached.';
+    default:
+      return `Call failed (${cause.replace(/_/g, ' ').toLowerCase()}).`;
+  }
 }
 
 function PhoneIcon() {

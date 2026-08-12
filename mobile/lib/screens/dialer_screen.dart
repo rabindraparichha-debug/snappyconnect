@@ -391,8 +391,10 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     await _telnyx.startCall(
       sipToken: tokenData['token'] as String,
       callerName: _user?.name ?? 'SnappyConnect',
-      callerNumber: _user?.mobileNumber ?? '',
-      destination: number,
+      // Caller ID must be one of the account's Telnyx numbers or the
+      // outbound leg is rejected — the personal mobile number is not one.
+      callerNumber: (tokenData['fromNumber'] as String?) ?? _user?.mobileNumber ?? '',
+      destination: Regions.toUsE164(number),
       onState: (state, detail) {
         if (!mounted) return;
         switch (state) {

@@ -99,8 +99,18 @@ export class TelnyxProvider implements CallingProviderStrategy {
     // Callers must present one of the account's numbers as caller ID or
     // Telnyx rejects the outbound leg. Users may carry their own direct
     // number in providerConfig; otherwise the shared default applies.
-    const fromNumber: string | undefined =
+    // Either may be stored without +1, which Telnyx rejects the same way
+    // it rejects unformatted SMS numbers.
+    const rawFrom: string | undefined =
       user.providerConfig?.telnyxNumber || cfg.fromNumber;
+    let fromNumber: string | undefined;
+    if (rawFrom) {
+      try {
+        fromNumber = toUsE164(String(rawFrom), 'caller ID number');
+      } catch {
+        fromNumber = String(rawFrom);
+      }
+    }
     return { token: token.replace(/^"|"$/g, ''), fromNumber };
   }
 
