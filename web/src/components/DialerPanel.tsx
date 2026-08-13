@@ -64,6 +64,38 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const [openScriptId, setOpenScriptId] = useState<string | null>(null);
   const [recordingEnabled, setRecordingEnabled] = useState(false);
 
+  // Post-call follow-up text (USA calls): offered after no-answer/voicemail
+  // so the missed dial still leaves a trace with the candidate.
+  const [followUpPhone, setFollowUpPhone] = useState<string | null>(null);
+  const [followUpText, setFollowUpText] = useState('');
+  const [followUpState, setFollowUpState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [followUpNote, setFollowUpNote] = useState('');
+
+  function offerFollowUp(phone: string) {
+    setFollowUpPhone(phone);
+    setFollowUpText(
+      'Hi, I just tried to reach you about a job opportunity. When would be a good time to talk?',
+    );
+    setFollowUpState('idle');
+    setFollowUpNote('');
+  }
+
+  async function sendFollowUp() {
+    if (!followUpPhone || !followUpText.trim()) return;
+    setFollowUpState('sending');
+    try {
+      await api('/sms/send', {
+        method: 'POST',
+        body: { to: followUpPhone, body: followUpText.trim() },
+      });
+      setFollowUpState('sent');
+      setFollowUpNote('Text sent — replies appear in Messages.');
+    } catch (err) {
+      setFollowUpState('error');
+      setFollowUpNote(err instanceof Error ? err.message : 'Could not send');
+    }
+  }
+
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
   const answeredAtRef = useRef<number | null>(null);
@@ -218,6 +250,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     if (!target) return;
     setMessage('');
     setElapsed(0);
+    setFollowUpPhone(null);
 
     // Telnyx calls are placed in-browser and never hit the server-side guard,
     // so the suppression list is checked here for every route.
@@ -449,6 +482,12 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           : 'Call ended — not answered',
     );
 
+    // No answer, or a suspiciously short "answer" (usually voicemail): offer
+    // a one-tap follow-up text so the attempt still reaches the candidate.
+    if (!failedInstantly && (!answered || duration <= 20)) {
+      offerFollowUp(target);
+    }
+
     const externalId =
       callRef.current?.telnyxIDs?.telnyxLegId ?? callRef.current?.id ?? undefined;
 
@@ -572,6 +611,41 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           {message}
           {state === 'active' && ` · ${elapsed}s`}
         </p>
+      )}
+
+      {followUpPhone && state === 'ended' && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            📨 Couldn&apos;t reach them? Send a quick text
+          </p>
+          {followUpState === 'sent' ? (
+            <p className="mt-1 text-sm text-emerald-600">{followUpNote}</p>
+          ) : (
+            <>
+              <textarea
+                value={followUpText}
+                onChange={(e) => setFollowUpText(e.target.value.slice(0, 135))}
+                rows={3}
+                className="mt-2 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-600"
+              />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-xs text-slate-400">
+                  {followUpText.length}/135 · one segment · &quot;Reply STOP to opt out&quot; added
+                </span>
+                <Button
+                  onClick={sendFollowUp}
+                  disabled={followUpState === 'sending' || !followUpText.trim()}
+                  className="!px-3 !py-1.5 text-xs"
+                >
+                  {followUpState === 'sending' ? 'Sending…' : `Text ${followUpPhone}`}
+                </Button>
+              </div>
+              {followUpState === 'error' && (
+                <p className="mt-1 text-xs text-red-600">{followUpNote}</p>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       <div className="flex gap-2">
