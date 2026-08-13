@@ -18,9 +18,9 @@ import { SmsService } from './sms.service';
 export const BATCH_LIMITS = {
   /** Max recipients per batch — also the unit that spreads over one hour. */
   maxContacts: 50,
-  /** Max characters of the recruiter's text (the STOP notice is added on
-   * top); keeps every message to at most two billed segments. */
-  maxMessageChars: 250,
+  /** Max characters of the recruiter's text. With the STOP notice (24 chars)
+   * this keeps every bulk message to exactly ONE billed segment (160 GSM). */
+  maxMessageChars: 135,
   /** Max messages one recruiter may schedule per calendar day. */
   dailyPerUser: 200,
   /** Seconds between sends — 50 contacts take exactly one hour. */
@@ -76,12 +76,28 @@ export class SmsBatchesService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Scheduled messages need USA access.');
     }
 
-    const message = dto.message.trim();
+    // Normalise the characters word processors sneak in; anything left
+    // outside the GSM-7 set (emoji etc.) would silently switch the message
+    // to UCS-2 encoding and triple the cost — reject it instead.
+    const message = dto.message
+      .trim()
+      .replace(/[\u2018\u2019\u02bc]/g, "'")
+      .replace(/[\u201c\u201d]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/\u00a0/g, ' ');
     if (!message) throw new BadRequestException('Message is required');
+    const GSM7 = /^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-.\/:;<=>?¡ÄÖÑܧ¿äöñüà^{}\\\[~\]|€]*$/;
+    if (!GSM7.test(message)) {
+      const bad = [...message].filter((ch) => !GSM7.test(ch)).slice(0, 5).join(' ');
+      throw new BadRequestException(
+        `Remove these characters to keep the message one cheap segment: ${bad}`,
+      );
+    }
     if (message.length > BATCH_LIMITS.maxMessageChars) {
       throw new BadRequestException(
         `Message too long: ${message.length}/${BATCH_LIMITS.maxMessageChars} characters. ` +
-          'Shorter messages cost less and read better.',
+          'Bulk messages are strictly one SMS segment so each costs ~1 cent.',
       );
     }
 
