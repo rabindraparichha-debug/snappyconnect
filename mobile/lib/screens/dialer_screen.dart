@@ -646,7 +646,10 @@ class _Keypad extends StatelessWidget {
     );
   }
 
+  /// Holding "0" types "+" instead, the way native dialers do — needed for
+  /// international numbers (+91…, +971…).
   Widget _key(String value) {
+    final isZero = value == '0';
     return SizedBox(
       width: 72,
       height: 56,
@@ -659,11 +662,25 @@ class _Keypad extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: enabled ? () => onKey(value) : null,
-          child: Center(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-            ),
+          onLongPress: enabled && isZero ? () => onKey('+') : null,
+          child: Stack(
+            children: [
+              Center(
+                child: Text(
+                  value,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (isZero)
+                const Positioned(
+                  top: 6,
+                  right: 8,
+                  child: Text(
+                    '+',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

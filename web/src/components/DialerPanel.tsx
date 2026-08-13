@@ -124,6 +124,8 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const recorderRef = useRef<CallRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heldRef = useRef(false);
 
   useEffect(() => {
     setNumber(initialNumber);
@@ -163,6 +165,32 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       }
     }
     handlerRef.current = null;
+  }
+
+  /**
+   * Keypad entry. Holding "0" types "+" instead, the way phone dialers do —
+   * recruiters need it for international numbers (+91…, +971…).
+   */
+  function pressKey(key: string) {
+    if (heldRef.current) {
+      heldRef.current = false;
+      return;
+    }
+    setNumber((n) => n + key);
+  }
+
+  function startHold(key: string) {
+    if (key !== '0') return;
+    heldRef.current = false;
+    holdRef.current = setTimeout(() => {
+      heldRef.current = true;
+      setNumber((n) => n + '+');
+    }, 400);
+  }
+
+  function cancelHold() {
+    if (holdRef.current) clearTimeout(holdRef.current);
+    holdRef.current = null;
   }
 
   function startTimer() {
@@ -512,10 +540,20 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           <button
             key={key}
             disabled={busy}
-            onClick={() => setNumber((n) => n + key)}
-            className="rounded-lg bg-slate-100 py-2.5 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-40"
+            onClick={() => pressKey(key)}
+            onPointerDown={() => startHold(key)}
+            onPointerUp={cancelHold}
+            onPointerLeave={cancelHold}
+            onContextMenu={(e) => key === '0' && e.preventDefault()}
+            title={key === '0' ? 'Hold for +' : undefined}
+            className="relative rounded-lg bg-slate-100 py-2.5 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-40"
           >
             {key}
+            {key === '0' && (
+              <span className="absolute right-2 top-1.5 text-[10px] font-medium text-slate-400">
+                +
+              </span>
+            )}
           </button>
         ))}
       </div>
