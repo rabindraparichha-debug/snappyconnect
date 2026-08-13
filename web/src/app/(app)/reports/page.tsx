@@ -30,6 +30,10 @@ interface LeaderboardEntry {
   connectedCalls: number;
   talkTimeSeconds: number;
   uniqueContacts: number;
+  aiCalls: number;
+  aiAnswered: number;
+  aiVoicemails: number;
+  aiNotAnswered: number;
   connectionRate: number;
 }
 
@@ -198,9 +202,9 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
     }
 
     if (leaderboard.length > 0) {
-      printWindow.document.write(`<h2>Team Leaderboard</h2><table><thead><tr><th>#</th><th>Recruiter</th><th>Total</th><th>Connected</th><th>Rate</th><th>Talk Time</th><th>Contacts</th></tr></thead><tbody>`);
+      printWindow.document.write(`<h2>Team Leaderboard</h2><table><thead><tr><th>#</th><th>Recruiter</th><th>Total</th><th>Connected</th><th>Rate</th><th>Talk Time</th><th>Contacts</th><th>AI Calls</th><th>AI Answered</th><th>AI Voicemail</th><th>AI No Answer</th></tr></thead><tbody>`);
       for (const e of leaderboard) {
-        printWindow.document.write(`<tr><td>${e.rank}</td><td>${e.name}</td><td>${e.totalCalls}</td><td>${e.connectedCalls}</td><td>${e.connectionRate}%</td><td>${formatDuration(e.talkTimeSeconds)}</td><td>${e.uniqueContacts}</td></tr>`);
+        printWindow.document.write(`<tr><td>${e.rank}</td><td>${e.name}</td><td>${e.totalCalls}</td><td>${e.connectedCalls}</td><td>${e.connectionRate}%</td><td>${formatDuration(e.talkTimeSeconds)}</td><td>${e.uniqueContacts}</td><td>${e.aiCalls}</td><td>${e.aiAnswered}</td><td>${e.aiVoicemails}</td><td>${e.aiNotAnswered}</td></tr>`);
       }
       printWindow.document.write(`</tbody></table>`);
     }
@@ -397,6 +401,10 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
                     <Th>Rate</Th>
                     <Th>Talk Time</Th>
                     <Th>Contacts</Th>
+                    <Th>AI Calls</Th>
+                    <Th>AI Answered</Th>
+                    <Th>AI Voicemail</Th>
+                    <Th>AI No Answer</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -421,6 +429,10 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
                       <Td className="tabular-nums">{entry.connectionRate}%</Td>
                       <Td className="tabular-nums">{formatDuration(entry.talkTimeSeconds)}</Td>
                       <Td className="tabular-nums">{entry.uniqueContacts}</Td>
+                      <Td className="tabular-nums">{entry.aiCalls}</Td>
+                      <Td className="tabular-nums text-emerald-600">{entry.aiAnswered}</Td>
+                      <Td className="tabular-nums text-amber-600">{entry.aiVoicemails}</Td>
+                      <Td className="tabular-nums text-slate-400">{entry.aiNotAnswered}</Td>
                     </tr>
                   ))}
                 </tbody>

@@ -207,6 +207,9 @@ export class AnalyticsService {
       .addSelect(`COUNT(*) FILTER (WHERE call.status IN ('answered','completed'))`, 'connected')
       .addSelect('COALESCE(SUM(call."durationSeconds"), 0)', 'talkTime')
       .addSelect(`COUNT(DISTINCT call."phoneNumber")`, 'uniqueContacts')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true')`, 'aiCalls')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true' AND call.metadata ->> 'outcome' = 'VOICEMAIL')`, 'aiVoicemails')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true' AND call.status IN ('answered','completed') AND COALESCE(call.metadata ->> 'outcome', '') != 'VOICEMAIL')`, 'aiAnswered')
       .innerJoin('call.user', 'user')
       .groupBy('call.userId')
       .addGroupBy('user.name')
@@ -224,6 +227,10 @@ export class AnalyticsService {
       connectedCalls: Number(r.connected),
       talkTimeSeconds: Number(r.talkTime),
       uniqueContacts: Number(r.uniqueContacts),
+      aiCalls: Number(r.aiCalls),
+      aiAnswered: Number(r.aiAnswered),
+      aiVoicemails: Number(r.aiVoicemails),
+      aiNotAnswered: Number(r.aiCalls) - Number(r.aiAnswered) - Number(r.aiVoicemails),
       connectionRate: Number(r.total) > 0 ? +(Number(r.connected) / Number(r.total) * 100).toFixed(1) : 0,
     }));
   }
