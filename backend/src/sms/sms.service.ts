@@ -10,6 +10,7 @@ import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookEvent } from '../webhooks/webhook.entity';
+import { DncService } from '../dnc/dnc.service';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { SmsLog } from './sms-log.entity';
 
@@ -24,6 +25,7 @@ export class SmsService {
     private readonly notificationsService: NotificationsService,
     private readonly activityService: ActivityService,
     private readonly webhooksService: WebhooksService,
+    private readonly dncService: DncService,
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
@@ -33,16 +35,31 @@ export class SmsService {
       );
     }
 
+    // A prior STOP is binding — TCPA and the 10DLC campaign terms both
+    // require it to be honored permanently, not per-thread.
+    if (this.dncService.isBlocked(dto.to)) {
+      throw new BadRequestException(
+        `${dto.to} has opted out of messages (STOP) or is on the Do Not Call list.`,
+      );
+    }
+
+    // 10DLC campaigns require an opt-out notice; append it unless the
+    // message already carries one.
+    let body = dto.body;
+    if (!/\bSTOP\b/i.test(body)) {
+      body = `${body.trimEnd()}\n\nReply STOP to opt out.`;
+    }
+
     const log = this.smsRepo.create({
       userId: user.id,
       phoneNumber: dto.to,
       direction: SmsDirection.OUTBOUND,
-      body: dto.body,
+      body,
       status: SmsStatus.QUEUED,
     });
 
     try {
-      const { externalId } = await this.telnyxProvider.sendSms(dto.to, dto.body);
+      const { externalId } = await this.telnyxProvider.sendSms(dto.to, body);
       log.externalId = externalId;
       log.status = SmsStatus.SENT;
     } catch (err) {
@@ -66,6 +83,21 @@ export class SmsService {
 
     if (eventType === 'message.received') {
       const fromNumber = payload.from?.phone_number ?? 'unknown';
+
+      // Carrier-required opt-out handling: STOP (and friends) permanently
+      // suppresses the number for messages and calls alike.
+      const text: string = (payload.text ?? '').trim().toUpperCase();
+      if (['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'].includes(text)) {
+        const admins0 = await this.smsRepo.manager
+          .getRepository(User)
+          .find({ where: { role: Role.ADMIN } });
+        if (admins0[0]) {
+          await this.dncService
+            .add(admins0[0], fromNumber, 'SMS opt-out (STOP reply)')
+            .catch(() => undefined);
+        }
+        this.logger.log(`STOP received from ${fromNumber} — suppressed`);
+      }
       const sms = await this.smsRepo.save(
         this.smsRepo.create({
           userId: null,

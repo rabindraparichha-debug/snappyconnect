@@ -7,9 +7,10 @@ import { ProvidersModule } from '../providers/providers.module';
 import { SmsController } from './sms.controller';
 import { SmsLog } from './sms-log.entity';
 import { SmsService } from './sms.service';
+import { DncModule } from '../dnc/dnc.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SmsLog]), ProvidersModule, NotificationsModule, ActivityModule, WebhooksModule],
+  imports: [TypeOrmModule.forFeature([SmsLog]), ProvidersModule, NotificationsModule, ActivityModule, WebhooksModule, DncModule],
   controllers: [SmsController],
   providers: [SmsService],
   exports: [SmsService],

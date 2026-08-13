@@ -174,12 +174,24 @@ export class TelnyxApiService {
     });
   }
 
-  /** Bridge the caller to a SIP user (recruiter's browser) or a phone number. */
-  async transfer(callControlId: string, to: string, from?: string): Promise<void> {
+  /**
+   * Bridge the caller to a SIP user (recruiter's browser) or a phone number.
+   *
+   * `clientState` is echoed back on this leg's webhooks, which is how the voice
+   * controller recognises an unanswered transfer and falls through to voicemail.
+   */
+  async transfer(
+    callControlId: string,
+    to: string,
+    from?: string,
+    clientState?: string,
+    timeoutSecs = 30,
+  ): Promise<void> {
     await this.command(callControlId, 'transfer', {
       to,
       from,
-      timeout_secs: 30,
+      timeout_secs: timeoutSecs,
+      ...(clientState ? { client_state: Buffer.from(clientState).toString('base64') } : {}),
     });
   }
 
@@ -192,6 +204,22 @@ export class TelnyxApiService {
     await this.command(callControlId, 'record_start', {
       format: 'mp3',
       channels: 'single',
+    });
+  }
+
+  /**
+   * Speak a prompt, then record what the caller says until they hang up or go
+   * quiet — the voicemail primitive. The audio arrives as a
+   * `call.recording.saved` webhook like any other recording.
+   */
+  async recordVoicemail(callControlId: string, greeting: string): Promise<void> {
+    await this.speak(callControlId, greeting);
+    await this.command(callControlId, 'record_start', {
+      format: 'mp3',
+      channels: 'single',
+      play_beep: true,
+      max_length: 180,
+      timeout_secs: 5,
     });
   }
 

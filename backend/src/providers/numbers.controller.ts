@@ -1,6 +1,16 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -14,6 +24,30 @@ import { TelnyxApiService } from './telnyx-api.service';
 export const DEFAULT_GREETING =
   'Welcome to SnappyHires. {options} If you know the extension, please press it now, ' +
   'or stay on the line and an operator will answer.';
+
+class ExtensionRulesDto {
+  /** Spoken to callers who reach voicemail. Blank uses a generic greeting. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  voicemailGreeting?: string;
+
+  /** Where this recruiter's calls should ring instead, in E.164 (+91…). */
+  @IsOptional()
+  @IsString()
+  @Matches(/^(\+?\d[\d\s\-().]{6,19})?$/, { message: 'forwardTo must be a phone number' })
+  forwardTo?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forwardEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(60)
+  ringSeconds?: number;
+}
 
 class BuyNumberDto {
   @Matches(/^\d{3}$/, { message: 'areaCode must be 3 digits' })
@@ -243,6 +277,10 @@ export class NumbersController {
         name: u.name,
         email: u.email,
         ringsTo: u.providerConfig?.telnyxNumber ?? u.mobileNumber ?? null,
+        voicemailGreeting: u.providerConfig?.voicemailGreeting ?? '',
+        forwardTo: u.providerConfig?.forwardTo ?? '',
+        forwardEnabled: Boolean(u.providerConfig?.forwardEnabled),
+        ringSeconds: Number(u.providerConfig?.ringSeconds) || 25,
       }))
       .sort((a, b) => a.digit.localeCompare(b.digit));
 
@@ -279,6 +317,27 @@ export class NumbersController {
     }
 
     user.providerConfig = { ...(user.providerConfig ?? {}), ivrDigit: dto.digit };
+    await this.usersRepo.save(user);
+    return this.ivr();
+  }
+
+  /**
+   * Per-recruiter answering rules: their own voicemail greeting, how long their
+   * line rings, and an optional forwarding number (e.g. a USA line reaching a
+   * recruiter's India mobile).
+   */
+  @Patch('extensions/:userId')
+  async setExtensionRules(@Param('userId') userId: string, @Body() dto: ExtensionRulesDto) {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const cfg = { ...(user.providerConfig ?? {}) };
+    if (dto.voicemailGreeting !== undefined) cfg.voicemailGreeting = dto.voicemailGreeting.trim();
+    if (dto.forwardTo !== undefined) cfg.forwardTo = dto.forwardTo.trim();
+    if (dto.forwardEnabled !== undefined) cfg.forwardEnabled = dto.forwardEnabled;
+    if (dto.ringSeconds !== undefined) cfg.ringSeconds = dto.ringSeconds;
+
+    user.providerConfig = cfg;
     await this.usersRepo.save(user);
     return this.ivr();
   }

@@ -16,10 +16,40 @@ import { User } from '../users/user.entity';
  * Configure this URL on the Telnyx Voice API application:
  *   https://<host>/api/v1/webhooks/telnyx-voice
  */
+/**
+ * Where a recruiter's calls should ring. Forwarding wins when switched on —
+ * that is how a USA line reaches a recruiter sitting in India — otherwise the
+ * call goes to their own Telnyx number, then their mobile.
+ */
+function destinationFor(user: User): string | undefined {
+  const cfg = user.providerConfig ?? {};
+  if (cfg.forwardEnabled && cfg.forwardTo) return String(cfg.forwardTo).trim();
+  return cfg.telnyxNumber ?? user.mobileNumber ?? undefined;
+}
+
+/** How long to ring before giving up and offering voicemail. */
+function ringSecondsFor(user: User): number {
+  const secs = Number(user.providerConfig?.ringSeconds);
+  return Number.isFinite(secs) && secs >= 5 && secs <= 60 ? secs : 25;
+}
+
+function decodeState(clientState?: string): { vm?: string; leg?: string } | null {
+  if (!clientState) return null;
+  try {
+    return JSON.parse(Buffer.from(clientState, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 @SkipThrottle()
 @Controller('webhooks')
 export class VoiceWebhookController {
   private readonly logger = new Logger(VoiceWebhookController.name);
+
+  /** Legs that reached a recruiter, and legs already taking a message. */
+  private readonly bridged = new Set<string>();
+  private readonly voicemailed = new Set<string>();
 
   constructor(
     private readonly telnyx: TelnyxApiService,
@@ -49,6 +79,26 @@ export class VoiceWebhookController {
         case 'call.answered':
           if (isInbound) await this.playMenu(callControlId);
           break;
+
+        // A recruiter picked up — the transfer succeeded, so no voicemail.
+        case 'call.bridged':
+          this.bridged.add(callControlId);
+          break;
+
+        // An unanswered transfer ends here. The caller's own leg is still up,
+        // so send them to that recruiter's voicemail instead of dropping them.
+        case 'call.hangup': {
+          const state = decodeState(payload?.client_state);
+          if (state?.vm && state.leg && !this.bridged.has(callControlId)) {
+            const user = await this.usersRepo.findOne({ where: { id: state.vm } });
+            if (user && !this.voicemailed.has(state.leg)) {
+              await this.toVoicemail(state.leg, user);
+            }
+          }
+          this.bridged.delete(callControlId);
+          this.voicemailed.delete(callControlId);
+          break;
+        }
 
         case 'call.gather.ended': {
           const digit: string = payload?.digits ?? '';
@@ -112,7 +162,7 @@ export class VoiceWebhookController {
       operator = [...recruiters.values()][0] ?? null;
     }
 
-    const destination = operator?.providerConfig?.telnyxNumber ?? operator?.mobileNumber;
+    const destination = operator ? destinationFor(operator) : undefined;
     if (!destination) {
       await this.telnyx.speak(
         callControlId,
@@ -123,23 +173,52 @@ export class VoiceWebhookController {
     }
 
     await this.telnyx.speak(callControlId, 'Connecting you to an operator.');
-    await this.telnyx.transfer(callControlId, destination, boardNumber);
+    await this.telnyx.transfer(
+      callControlId,
+      destination,
+      boardNumber,
+      operator ? JSON.stringify({ vm: operator.id, leg: callControlId }) : undefined,
+      operator ? ringSecondsFor(operator) : 30,
+    );
   }
 
   private async routeDigit(callControlId: string, digit: string, boardNumber?: string) {
     const recruiters = await this.recruitersByDigit();
     const target = recruiters.get(digit);
-    const destination = target?.providerConfig?.telnyxNumber ?? target?.mobileNumber;
-
-    if (!destination) {
+    if (!target) {
       await this.telnyx.speak(callControlId, 'That extension is unavailable. Goodbye.');
       await this.telnyx.hangup(callControlId);
       return;
     }
 
-    await this.telnyx.speak(callControlId, `Connecting you to ${target!.name}.`);
+    const destination = destinationFor(target);
+    if (!destination) {
+      // Nowhere to ring, but the recruiter can still take a message.
+      await this.toVoicemail(callControlId, target);
+      return;
+    }
+
+    await this.telnyx.speak(callControlId, `Connecting you to ${target.name}.`);
     // Keep the board line as caller ID so the recruiter sees which line rang.
-    await this.telnyx.transfer(callControlId, destination, boardNumber);
+    await this.telnyx.transfer(
+      callControlId,
+      destination,
+      boardNumber,
+      JSON.stringify({ vm: target.id, leg: callControlId }),
+      ringSecondsFor(target),
+    );
+  }
+
+  /**
+   * Play the recruiter's own greeting and record a message. Falls back to a
+   * generic line so a caller is never dropped in silence.
+   */
+  private async toVoicemail(callControlId: string, user: User): Promise<void> {
+    const greeting =
+      user.providerConfig?.voicemailGreeting?.trim() ||
+      `You have reached ${user.name}. Please leave a message after the tone.`;
+    this.voicemailed.add(callControlId);
+    await this.telnyx.recordVoicemail(callControlId, greeting);
   }
 
   /** Users with a menu digit assigned, keyed by that digit. */
