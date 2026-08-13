@@ -16,6 +16,7 @@ import {
   CallStatus,
   CallingProvider,
   Region,
+  Role,
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { DncService } from '../dnc/dnc.service';
@@ -140,6 +141,17 @@ export class AiCallsService {
       );
     }
 
+    // Remember the platform's call id — live supervision addresses calls by it.
+    try {
+      const platformCall = (await res.json()) as { call_id?: string };
+      if (platformCall.call_id) {
+        log.metadata = { ...(log.metadata ?? {}), platformCallId: platformCall.call_id };
+        await this.callLogsRepo.save(log);
+      }
+    } catch {
+      /* dispatch succeeded; supervision just won't know this call */
+    }
+
     return {
       taskId,
       callLogId: log.id,
@@ -235,6 +247,98 @@ export class AiCallsService {
     }
 
     return { received: true };
+  }
+
+  /** This user's AI calls in progress (admins see everyone's). */
+  async activeCalls(user: User) {
+    const res = await this.platformFetch('GET', '/v1/calls/active');
+    const live: Array<{ call_id: string; phone: string; seconds: number; taken_over: boolean }> =
+      await res.json();
+    if (!live.length) return [];
+
+    const logs = await this.callLogsRepo
+      .createQueryBuilder('log')
+      .where(`log.metadata ->> 'platformCallId' IN (:...ids)`, {
+        ids: live.map((c) => c.call_id),
+      })
+      .getMany();
+    const byPlatformId = new Map(
+      logs.map((l) => [String(l.metadata?.platformCallId), l] as const),
+    );
+
+    return live
+      .filter((c) => {
+        const log = byPlatformId.get(c.call_id);
+        if (!log) return false;
+        return user.role === Role.ADMIN || log.userId === user.id;
+      })
+      .map((c) => ({
+        platformCallId: c.call_id,
+        phone: c.phone,
+        contactName: byPlatformId.get(c.call_id)?.contactName ?? null,
+        seconds: c.seconds,
+        takenOver: c.taken_over,
+      }));
+  }
+
+  /** Listen/speak token for one of the user's own live calls. */
+  async listenToken(user: User, platformCallId: string, publish: boolean) {
+    await this.assertOwnLiveCall(user, platformCallId);
+    const form = new URLSearchParams({ publish: publish ? 'true' : 'false' });
+    const res = await this.platformFetch(
+      'POST',
+      `/v1/calls/${platformCallId}/listen-token`,
+      form,
+    );
+    if (!res.ok) {
+      throw new ServiceUnavailableException('That call is no longer live.');
+    }
+    return res.json();
+  }
+
+  /** Stop the AI on the user's own live call so they can carry it on. */
+  async takeover(user: User, platformCallId: string) {
+    await this.assertOwnLiveCall(user, platformCallId);
+    const res = await this.platformFetch('POST', `/v1/calls/${platformCallId}/takeover`);
+    if (!res.ok) {
+      throw new ServiceUnavailableException('That call is no longer live.');
+    }
+    const log = await this.findByPlatformId(platformCallId);
+    if (log) {
+      log.metadata = { ...(log.metadata ?? {}), takenOver: true };
+      await this.callLogsRepo.save(log);
+    }
+    return { ok: true };
+  }
+
+  private async assertOwnLiveCall(user: User, platformCallId: string): Promise<void> {
+    const log = await this.findByPlatformId(platformCallId);
+    if (!log || (user.role !== Role.ADMIN && log.userId !== user.id)) {
+      throw new ForbiddenException('Not your call.');
+    }
+  }
+
+  private async findByPlatformId(platformCallId: string): Promise<CallLog | null> {
+    return this.callLogsRepo
+      .createQueryBuilder('log')
+      .where(`log.metadata ->> 'platformCallId' = :id`, { id: platformCallId })
+      .getOne();
+  }
+
+  private async platformFetch(
+    method: string,
+    path: string,
+    body?: URLSearchParams,
+  ): Promise<Response> {
+    try {
+      return await fetch(`${this.platformUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${this.platformKey}` },
+        body,
+      });
+    } catch {
+      throw new ServiceUnavailableException('The AI voice platform is not reachable.');
+    }
   }
 
   private soleRegion(user: User): Region | null {

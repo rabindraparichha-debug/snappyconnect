@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   HttpCode,
+  Param,
   Post,
   RawBodyRequest,
   Req,
@@ -29,6 +31,29 @@ export class AiCallsController {
   @Post()
   dispatch(@CurrentUser() user: User, @Body() dto: DispatchAiCallDto) {
     return this.aiCalls.dispatch(user, dto);
+  }
+
+  /** The caller's own AI calls in progress (admins see everyone's). */
+  @ApiBearerAuth()
+  @Get('active')
+  active(@CurrentUser() user: User) {
+    return this.aiCalls.activeCalls(user);
+  }
+
+  @ApiBearerAuth()
+  @Post(':platformCallId/listen-token')
+  listenToken(
+    @CurrentUser() user: User,
+    @Param('platformCallId') platformCallId: string,
+    @Body() body: { publish?: boolean },
+  ) {
+    return this.aiCalls.listenToken(user, platformCallId, Boolean(body?.publish));
+  }
+
+  @ApiBearerAuth()
+  @Post(':platformCallId/takeover')
+  takeover(@CurrentUser() user: User, @Param('platformCallId') platformCallId: string) {
+    return this.aiCalls.takeover(user, platformCallId);
   }
 
   /** Voice-platform callback: events and final results, HMAC-signed. */

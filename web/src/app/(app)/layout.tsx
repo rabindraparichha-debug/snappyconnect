@@ -18,6 +18,7 @@ const NAV = [
   { href: '/schedule', label: 'Schedule', icon: CalendarIcon, adminOnly: false },
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
+  { href: '/ai-calls', label: 'AI Calls', icon: BotIcon, adminOnly: false },
   { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },
   { href: '/users', label: 'Users', icon: UsersIcon, adminOnly: true },
   { href: '/numbers', label: 'Phone Numbers', icon: PhoneIcon, adminOnly: true },
@@ -169,6 +170,14 @@ function HomeIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function BotIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m-5 3h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2zm2.5 4.5h.01m4.99 0h.01M3 13v3m18-3v3" />
+    </svg>
+  );
+}
+
 function DownloadIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
