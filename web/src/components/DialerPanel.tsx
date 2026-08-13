@@ -71,6 +71,31 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const [followUpState, setFollowUpState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [followUpNote, setFollowUpNote] = useState('');
 
+  const [aiDispatching, setAiDispatching] = useState(false);
+
+  /** Hand the dialled number to the AI agent instead of calling in person. */
+  async function aiCall() {
+    const target = number.trim();
+    if (!target) return;
+    if (!window.confirm(`Have the AI agent call ${target} instead of you?`)) return;
+    setAiDispatching(true);
+    setMessage('');
+    try {
+      const res = await api<{ message: string }>('/ai-calls', {
+        method: 'POST',
+        body: { phoneNumber: target },
+      });
+      setState('queued');
+      setMessage(`${res.message} Listen in or take over from the AI Calls page.`);
+      setNumber('');
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error ? err.message : 'AI call failed');
+    } finally {
+      setAiDispatching(false);
+    }
+  }
+
   function offerFollowUp(phone: string) {
     setFollowUpPhone(phone);
     setFollowUpText(
@@ -650,9 +675,22 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
 
       <div className="flex gap-2">
         {!busy ? (
-          <Button onClick={placeCall} className="w-full bg-emerald-600 hover:bg-emerald-700">
-            <PhoneIcon /> Call
-          </Button>
+          <>
+            <Button onClick={placeCall} className="w-full bg-emerald-600 hover:bg-emerald-700">
+              <PhoneIcon /> Call
+            </Button>
+            {(user?.regions?.includes('usa') || user?.regions?.includes('uae')) && (
+              <Button
+                variant="secondary"
+                onClick={aiCall}
+                disabled={aiDispatching || !number.trim()}
+                title="The AI agent calls this number and holds the conversation — listen in or take over from the AI Calls page"
+                className="shrink-0"
+              >
+                {aiDispatching ? '…' : '🤖 AI'}
+              </Button>
+            )}
+          </>
         ) : (
           <Button variant="danger" onClick={hangup} className="w-full">
             Hang up
