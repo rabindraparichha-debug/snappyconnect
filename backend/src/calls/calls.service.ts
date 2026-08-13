@@ -156,7 +156,13 @@ export class CallsService {
       user: { id: user.id, name: user.name, email: user.email },
     });
 
-    if (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER) {
+    // Only genuinely inbound calls are "missed calls" — a recruiter's own
+    // outbound attempt that nobody answered used to generate a bogus
+    // "Missed call from <the number they dialled>" notification.
+    if (
+      dto.direction === CallDirection.INBOUND &&
+      (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER)
+    ) {
       this.notificationsService.create(
         user.id,
         NotificationType.MISSED_CALL,

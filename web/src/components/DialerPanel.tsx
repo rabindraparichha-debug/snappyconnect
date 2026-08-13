@@ -404,8 +404,22 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       ? Math.floor((Date.now() - (answeredAtRef.current as number)) / 1000)
       : 0;
 
+    // Telnyx says WHY a call ended (rejected, busy, invalid number…) — an
+    // unanswered instant failure is a different problem from ringing out,
+    // and hiding the cause made those indistinguishable.
+    const cause: string | undefined =
+      callRef.current?.cause ?? callRef.current?.hangupCause ?? undefined;
+    const failedInstantly = !answered && duration === 0 && cause &&
+      !['NORMAL_CLEARING', 'ORIGINATOR_CANCEL'].includes(cause);
+
     setState('ended');
-    setMessage(answered ? `Call ended (${duration}s)` : 'Call ended — not answered');
+    setMessage(
+      answered
+        ? `Call ended (${duration}s)`
+        : failedInstantly
+          ? `Call failed — carrier says: ${cause}. The number may be blocking or unreachable.`
+          : 'Call ended — not answered',
+    );
 
     const externalId =
       callRef.current?.telnyxIDs?.telnyxLegId ?? callRef.current?.id ?? undefined;
@@ -425,6 +439,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           startedAt: dialStartedAtRef.current ?? undefined,
           endedAt: new Date().toISOString(),
           externalId,
+          notes: cause && cause !== 'NORMAL_CLEARING' ? `Hangup cause: ${cause}` : undefined,
         },
       });
       if (audio && log?.id) {
