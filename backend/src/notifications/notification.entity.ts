@@ -13,6 +13,7 @@ export enum NotificationType {
   MISSED_CALL = 'missed_call',
   INBOUND_SMS = 'inbound_sms',
   FOLLOW_UP_DUE = 'follow_up_due',
+  AI_CALL_ANSWERED = 'ai_call_answered',
 }
 
 @Entity('notifications')

@@ -20,6 +20,8 @@ import {
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { DncService } from '../dnc/dnc.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/notification.entity';
 import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
 import { DispatchAiCallDto } from './dto/dispatch-ai-call.dto';
@@ -43,6 +45,7 @@ export class AiCallsService {
 
   constructor(
     private readonly dncService: DncService,
+    private readonly notifications: NotificationsService,
     @InjectRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
     @InjectRepository(User)
@@ -204,6 +207,20 @@ export class AiCallsService {
 
     if (payload.event === 'call.answered') {
       await this.callLogsRepo.update(log.id, { status: CallStatus.ANSWERED });
+      // Tell the owning recruiter their AI call is live, so they can jump in
+      // from the AI Calls page. If it turns out to be voicemail, the agent
+      // wraps up on its own and nothing further is needed.
+      if (log.userId) {
+        this.notifications
+          .create(
+            log.userId,
+            NotificationType.AI_CALL_ANSWERED,
+            `AI call to ${log.contactName || log.phoneNumber} was answered — join live from AI Calls`,
+            undefined,
+            log.id,
+          )
+          .catch(() => undefined);
+      }
       return { received: true };
     }
     if (payload.event && payload.event !== 'call.completed') {
