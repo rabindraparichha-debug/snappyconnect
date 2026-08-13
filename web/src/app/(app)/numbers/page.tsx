@@ -26,6 +26,10 @@ interface Extension {
   name: string;
   email: string;
   ringsTo: string | null;
+  voicemailGreeting: string;
+  forwardTo: string;
+  forwardEnabled: boolean;
+  ringSeconds: number;
 }
 
 interface IvrConfig {
@@ -69,25 +73,38 @@ export default function NumbersPage() {
   const [newExtUser, setNewExtUser] = useState('');
   const [newExtDigit, setNewExtDigit] = useState('');
 
+  // Per-recruiter answering rules: voicemail greeting and call forwarding.
+  const [editingExt, setEditingExt] = useState<Extension | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [nums, userList, ivrConfig] = await Promise.all([
-        api<AccountNumber[]>('/numbers'),
-        api<Paginated<User>>('/users', { query: { limit: 100 } }),
-        api<IvrConfig>('/numbers/ivr'),
-      ]);
-      setNumbers(nums);
-      setUsers(userList.items);
-      setIvr(ivrConfig);
-      setGreeting(ivrConfig.greeting);
-      setOperatorId(ivrConfig.operatorUserId ?? '');
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load numbers');
-    } finally {
-      setLoading(false);
+    // The number list comes from Telnyx and fails when credentials are missing;
+    // greetings and extensions live in our own database, so they must still load.
+    const [nums, userList, ivrConfig] = await Promise.allSettled([
+      api<AccountNumber[]>('/numbers'),
+      api<Paginated<User>>('/users', { query: { limit: 100 } }),
+      api<IvrConfig>('/numbers/ivr'),
+    ]);
+
+    if (nums.status === 'fulfilled') setNumbers(nums.value);
+    if (userList.status === 'fulfilled') setUsers(userList.value.items);
+    if (ivrConfig.status === 'fulfilled') {
+      setIvr(ivrConfig.value);
+      setGreeting(ivrConfig.value.greeting);
+      setOperatorId(ivrConfig.value.operatorUserId ?? '');
     }
+
+    const failure = [nums, userList, ivrConfig].find((r) => r.status === 'rejected') as
+      | PromiseRejectedResult
+      | undefined;
+    setError(
+      failure
+        ? failure.reason instanceof Error
+          ? failure.reason.message
+          : 'Some settings could not be loaded'
+        : null,
+    );
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -412,7 +429,15 @@ export default function NumbersPage() {
                       {ext.ringsTo ? `rings ${ext.ringsTo}` : 'no destination — assign a number'}
                     </p>
                   </div>
-                  {!ext.ringsTo && <Tag tone="slate">needs number</Tag>}
+                  {ext.forwardEnabled && ext.forwardTo && <Tag tone="brand">forwarding</Tag>}
+                  {!ext.ringsTo && !ext.forwardEnabled && <Tag tone="slate">needs number</Tag>}
+                  <Button
+                    variant="ghost"
+                    className="!px-2 !py-1 text-xs"
+                    onClick={() => setEditingExt(ext)}
+                  >
+                    Answering rules
+                  </Button>
                   <Button
                     variant="ghost"
                     className="!px-2 !py-1 text-xs"
@@ -459,6 +484,17 @@ export default function NumbersPage() {
       </Card>
 
       <SimPortsCard users={users} />
+
+      {editingExt && (
+        <AnsweringRulesModal
+          ext={editingExt}
+          onClose={() => setEditingExt(null)}
+          onSaved={(updated) => {
+            setIvr(updated);
+            setEditingExt(null);
+          }}
+        />
+      )}
 
       {/* Buy */}
       <Modal open={buyOpen} title="Buy a US number" onClose={() => setBuyOpen(false)} wide>
@@ -542,6 +578,134 @@ export default function NumbersPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * How one recruiter's incoming calls are answered: where they ring (their own
+ * line, or forwarded abroad) and what callers hear if nobody picks up.
+ */
+function AnsweringRulesModal({
+  ext,
+  onClose,
+  onSaved,
+}: {
+  ext: Extension;
+  onClose: () => void;
+  onSaved: (config: IvrConfig) => void;
+}) {
+  const [greeting, setGreeting] = useState(ext.voicemailGreeting);
+  const [forwardTo, setForwardTo] = useState(ext.forwardTo);
+  const [forwardEnabled, setForwardEnabled] = useState(ext.forwardEnabled);
+  const [ringSeconds, setRingSeconds] = useState(String(ext.ringSeconds));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      const updated = await api<IvrConfig>(`/numbers/extensions/${ext.userId}`, {
+        method: 'PATCH',
+        body: {
+          voicemailGreeting: greeting,
+          forwardTo,
+          forwardEnabled,
+          ringSeconds: Number(ringSeconds) || 25,
+        },
+      });
+      onSaved(updated);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save the answering rules');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open title={`Answering rules — ${ext.name}`} onClose={onClose} wide>
+      <div className="col-span-full space-y-5">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Voicemail greeting
+          </label>
+          <textarea
+            rows={3}
+            value={greeting}
+            onChange={(e) => setGreeting(e.target.value)}
+            placeholder={`You have reached ${ext.name}. Please leave a message after the tone.`}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Read aloud to callers who reach {ext.name}&rsquo;s voicemail. Leave blank to use the
+            standard wording shown above.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 p-4">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={forwardEnabled}
+              onChange={(e) => setForwardEnabled(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-800">
+                Forward calls to another number
+              </span>
+              <span className="block text-xs text-slate-500">
+                Rings this number instead of {ext.name}&rsquo;s own line — use it to reach a
+                recruiter on their India mobile.
+              </span>
+            </span>
+          </label>
+
+          {forwardEnabled && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Forward to
+                </label>
+                <Input
+                  value={forwardTo}
+                  onChange={(e) => setForwardTo(e.target.value)}
+                  placeholder="+91 98765 43210"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Ring for (seconds)
+                </label>
+                <Input
+                  type="number"
+                  min={5}
+                  max={60}
+                  value={ringSeconds}
+                  onChange={(e) => setRingSeconds(e.target.value)}
+                />
+              </div>
+              <p className="sm:col-span-2 text-xs text-amber-700">
+                Forwarding to a phone number is billed by Telnyx as an outbound call for the whole
+                conversation. Forwarding to the recruiter&rsquo;s SnappyConnect app instead costs
+                nothing.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {err && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{err}</p>}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : 'Save rules'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
