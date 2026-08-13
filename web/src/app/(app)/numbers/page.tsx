@@ -27,8 +27,6 @@ interface Extension {
   email: string;
   ringsTo: string | null;
   voicemailGreeting: string;
-  forwardTo: string;
-  forwardEnabled: boolean;
   ringSeconds: number;
 }
 
@@ -429,8 +427,7 @@ export default function NumbersPage() {
                       {ext.ringsTo ? `rings ${ext.ringsTo}` : 'no destination — assign a number'}
                     </p>
                   </div>
-                  {ext.forwardEnabled && ext.forwardTo && <Tag tone="brand">forwarding</Tag>}
-                  {!ext.ringsTo && !ext.forwardEnabled && <Tag tone="slate">needs number</Tag>}
+                  {!ext.ringsTo && <Tag tone="slate">needs number</Tag>}
                   <Button
                     variant="ghost"
                     className="!px-2 !py-1 text-xs"
@@ -595,8 +592,6 @@ function AnsweringRulesModal({
   onSaved: (config: IvrConfig) => void;
 }) {
   const [greeting, setGreeting] = useState(ext.voicemailGreeting);
-  const [forwardTo, setForwardTo] = useState(ext.forwardTo);
-  const [forwardEnabled, setForwardEnabled] = useState(ext.forwardEnabled);
   const [ringSeconds, setRingSeconds] = useState(String(ext.ringSeconds));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -609,8 +604,6 @@ function AnsweringRulesModal({
         method: 'PATCH',
         body: {
           voicemailGreeting: greeting,
-          forwardTo,
-          forwardEnabled,
           ringSeconds: Number(ringSeconds) || 25,
         },
       });
@@ -642,56 +635,20 @@ function AnsweringRulesModal({
           </p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 p-4">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={forwardEnabled}
-              onChange={(e) => setForwardEnabled(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300"
-            />
-            <span>
-              <span className="block text-sm font-medium text-slate-800">
-                Forward calls to another number
-              </span>
-              <span className="block text-xs text-slate-500">
-                Rings this number instead of {ext.name}&rsquo;s own line — use it to reach a
-                recruiter on their India mobile.
-              </span>
-            </span>
+        <div className="sm:w-48">
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Ring for (seconds)
           </label>
-
-          {forwardEnabled && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Forward to
-                </label>
-                <Input
-                  value={forwardTo}
-                  onChange={(e) => setForwardTo(e.target.value)}
-                  placeholder="+91 98765 43210"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Ring for (seconds)
-                </label>
-                <Input
-                  type="number"
-                  min={5}
-                  max={60}
-                  value={ringSeconds}
-                  onChange={(e) => setRingSeconds(e.target.value)}
-                />
-              </div>
-              <p className="sm:col-span-2 text-xs text-amber-700">
-                Forwarding to a phone number is billed by Telnyx as an outbound call for the whole
-                conversation. Forwarding to the recruiter&rsquo;s SnappyConnect app instead costs
-                nothing.
-              </p>
-            </div>
-          )}
+          <Input
+            type="number"
+            min={5}
+            max={60}
+            value={ringSeconds}
+            onChange={(e) => setRingSeconds(e.target.value)}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            How long {ext.name}&rsquo;s line rings before the caller is offered voicemail.
+          </p>
         </div>
 
         {err && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{err}</p>}

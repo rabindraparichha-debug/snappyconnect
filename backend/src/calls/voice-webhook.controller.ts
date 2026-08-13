@@ -17,14 +17,15 @@ import { User } from '../users/user.entity';
  *   https://<host>/api/v1/webhooks/telnyx-voice
  */
 /**
- * Where a recruiter's calls should ring. Forwarding wins when switched on —
- * that is how a USA line reaches a recruiter sitting in India — otherwise the
- * call goes to their own Telnyx number, then their mobile.
+ * Where a recruiter's calls ring: their own Telnyx line, then their mobile.
+ *
+ * Forwarding to an arbitrary number is deliberately not offered — Telnyx bills
+ * a forwarded leg as an outbound international call for the whole conversation.
+ * Recruiters abroad sign in to SnappyConnect instead, which carries the call
+ * over the internet at no per-minute cost.
  */
 function destinationFor(user: User): string | undefined {
-  const cfg = user.providerConfig ?? {};
-  if (cfg.forwardEnabled && cfg.forwardTo) return String(cfg.forwardTo).trim();
-  return cfg.telnyxNumber ?? user.mobileNumber ?? undefined;
+  return user.providerConfig?.telnyxNumber ?? user.mobileNumber ?? undefined;
 }
 
 /** How long to ring before giving up and offering voicemail. */

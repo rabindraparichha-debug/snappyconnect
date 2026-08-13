@@ -32,16 +32,6 @@ class ExtensionRulesDto {
   @MaxLength(500)
   voicemailGreeting?: string;
 
-  /** Where this recruiter's calls should ring instead, in E.164 (+91…). */
-  @IsOptional()
-  @IsString()
-  @Matches(/^(\+?\d[\d\s\-().]{6,19})?$/, { message: 'forwardTo must be a phone number' })
-  forwardTo?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  forwardEnabled?: boolean;
-
   @IsOptional()
   @IsInt()
   @Min(5)
@@ -278,8 +268,6 @@ export class NumbersController {
         email: u.email,
         ringsTo: u.providerConfig?.telnyxNumber ?? u.mobileNumber ?? null,
         voicemailGreeting: u.providerConfig?.voicemailGreeting ?? '',
-        forwardTo: u.providerConfig?.forwardTo ?? '',
-        forwardEnabled: Boolean(u.providerConfig?.forwardEnabled),
         ringSeconds: Number(u.providerConfig?.ringSeconds) || 25,
       }))
       .sort((a, b) => a.digit.localeCompare(b.digit));
@@ -322,9 +310,8 @@ export class NumbersController {
   }
 
   /**
-   * Per-recruiter answering rules: their own voicemail greeting, how long their
-   * line rings, and an optional forwarding number (e.g. a USA line reaching a
-   * recruiter's India mobile).
+   * Per-recruiter answering rules: their own voicemail greeting and how long
+   * their line rings before callers are offered it.
    */
   @Patch('extensions/:userId')
   async setExtensionRules(@Param('userId') userId: string, @Body() dto: ExtensionRulesDto) {
@@ -333,9 +320,10 @@ export class NumbersController {
 
     const cfg = { ...(user.providerConfig ?? {}) };
     if (dto.voicemailGreeting !== undefined) cfg.voicemailGreeting = dto.voicemailGreeting.trim();
-    if (dto.forwardTo !== undefined) cfg.forwardTo = dto.forwardTo.trim();
-    if (dto.forwardEnabled !== undefined) cfg.forwardEnabled = dto.forwardEnabled;
     if (dto.ringSeconds !== undefined) cfg.ringSeconds = dto.ringSeconds;
+    // Any forwarding left over from an earlier build must not keep billing.
+    delete cfg.forwardTo;
+    delete cfg.forwardEnabled;
 
     user.providerConfig = cfg;
     await this.usersRepo.save(user);
