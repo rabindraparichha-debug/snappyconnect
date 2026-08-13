@@ -415,12 +415,12 @@ export class CallsService {
       .createQueryBuilder('call')
       .select('call.phoneNumber', 'phoneNumber')
       .addSelect('MAX(call.contactName)', 'contactName')
-      .addSelect('COUNT(*)::int', 'totalCalls')
+      .addSelect('CAST(COUNT(*) AS int)', 'totalCalls')
       .addSelect(
-        `COUNT(*) FILTER (WHERE call.status IN ('completed','answered'))::int`,
+        `CAST(COUNT(*) FILTER (WHERE call.status IN ('completed','answered')) AS int)`,
         'connectedCalls',
       )
-      .addSelect('SUM(call.durationSeconds)::int', 'totalTalkTime')
+      .addSelect('CAST(SUM(call.durationSeconds) AS int)', 'totalTalkTime')
       .addSelect('MAX(call.createdAt)', 'lastCallAt')
       .addSelect('MIN(call.createdAt)', 'firstCallAt')
       .groupBy('call.phoneNumber')

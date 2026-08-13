@@ -184,6 +184,23 @@ export class UsersService {
     return this.sanitize(saved);
   }
 
+  /** Self-service: a user edits their own voicemail greeting / ring time. */
+  async updateOwnVoicemail(
+    id: string,
+    dto: { voicemailGreeting?: string; ringSeconds?: number },
+  ): Promise<User> {
+    const user = await this.findById(id);
+    const cfg = { ...(user.providerConfig ?? {}) };
+    if (dto.voicemailGreeting !== undefined) {
+      const text = dto.voicemailGreeting.trim();
+      if (text) cfg.voicemailGreeting = text;
+      else delete cfg.voicemailGreeting;
+    }
+    if (dto.ringSeconds !== undefined) cfg.ringSeconds = dto.ringSeconds;
+    user.providerConfig = cfg;
+    return this.sanitize(await this.usersRepo.save(user));
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findById(id);
     if (user.role === Role.ADMIN) {
