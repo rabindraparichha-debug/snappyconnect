@@ -50,12 +50,22 @@ export class TelnyxApiService {
 
   /** Credential connection dedicated to one user, so their number can ring them. */
   async createCredentialConnection(name: string): Promise<{ id: string }> {
+    // A connection without an outbound voice profile cannot place any PSTN
+    // call — Telnyx rejects everything instantly (CALL_REJECTED). Four
+    // recruiters were silently broken this way, so the profile is attached
+    // at birth, never assumed.
+    const profiles = await this.request<any>('/outbound_voice_profiles?page[size]=1');
+    const profileId = profiles?.data?.[0]?.id;
+
     const data = await this.request<any>('/credential_connections', {
       method: 'POST',
       body: {
         connection_name: name,
         user_name: `sc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
         password: this.randomSecret(),
+        ...(profileId
+          ? { outbound: { outbound_voice_profile_id: String(profileId) } }
+          : {}),
         // Browsers register over WSS; encrypted media keeps Chrome happy.
         webhook_event_url: undefined,
       },
