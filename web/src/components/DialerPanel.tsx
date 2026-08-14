@@ -54,6 +54,16 @@ interface CallScript {
  * WebRTC; for Grandstream/Native Dialer users it asks the API to initiate
  * (PBX originate / queue to mobile) and shows the outcome.
  */
+/** Plain-English hints for the Telnyx hangup causes recruiters actually hit. */
+const CAUSE_HINTS: Record<string, string> = {
+  UNALLOCATED_NUMBER: 'This number does not exist as dialed \u2014 it may be disconnected or have a wrong/missing digit. Double-check it against the candidate\u2019s record.',
+  CALL_REJECTED: 'The carrier or the recipient\u2019s phone rejected the call.',
+  USER_BUSY: 'The line is busy \u2014 try again in a few minutes.',
+  NO_USER_RESPONSE: 'The number rang but the network got no response.',
+  NORMAL_TEMPORARY_FAILURE: 'A temporary network problem \u2014 try again.',
+  INVALID_NUMBER_FORMAT: 'The number format is invalid \u2014 use +1 followed by the 10-digit number.',
+};
+
 export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) {
   const user = getStoredUser();
   const [number, setNumber] = useState(initialNumber);
@@ -403,7 +413,24 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     isSipCallRef.current = false;
   }
 
+  /**
+   * Telnyx routes strictly on E.164; numbers pasted from sheets and ATS
+   * exports arrive as "203-555-0148", "1 (203) 555-0148", "0044…" and so on.
+   * Dialing those verbatim comes back as UNALLOCATED_NUMBER even when the
+   * number itself is fine.
+   */
+  function toE164(raw: string): string {
+    let n = raw.replace(/[^\d+]/g, '');
+    if (n.startsWith('00')) n = '+' + n.slice(2);
+    if (n.startsWith('+')) return n;
+    if (/^1\d{10}$/.test(n)) return '+' + n;      // 1 + US 10-digit
+    if (/^\d{10}$/.test(n)) return '+1' + n;      // bare US 10-digit
+    if (/^\d{11,15}$/.test(n)) return '+' + n;    // country code included
+    return n;
+  }
+
   async function placeTelnyxCall(target: string) {
+    target = toE164(target);
     setState('connecting');
     setMessage('Requesting microphone access…');
     dialStartedAtRef.current = new Date().toISOString();
@@ -503,7 +530,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       answered
         ? `Call ended (${duration}s)`
         : failedInstantly
-          ? `Call failed — carrier says: ${cause}. The number may be blocking or unreachable.`
+          ? `Call failed — carrier says: ${cause}. ${CAUSE_HINTS[cause] ?? 'The number may be blocking or unreachable.'}`
           : 'Call ended — not answered',
     );
 
