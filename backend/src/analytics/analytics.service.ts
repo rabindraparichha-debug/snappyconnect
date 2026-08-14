@@ -224,6 +224,7 @@ export class AnalyticsService {
       name: r.name,
       email: r.email,
       totalCalls: Number(r.total),
+      humanCalls: Number(r.total) - Number(r.aiCalls),
       connectedCalls: Number(r.connected),
       talkTimeSeconds: Number(r.talkTime),
       uniqueContacts: Number(r.uniqueContacts),
