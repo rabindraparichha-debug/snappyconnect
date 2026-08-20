@@ -55,21 +55,22 @@ jobs:
             echo "=== probe: port 8000 ==="
             curl -s --max-time 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8000 || echo "(nothing on 8000)"
             echo
-            echo "=== llm-tunnel.service unit ==="
-            systemctl cat llm-tunnel.service 2>/dev/null || echo "(no such unit)"
+            echo "=== llm tunnel status ==="
+            systemctl is-active llm-tunnel || true
+            ss -tln | grep 18080 || echo "(no listener on 18080)"
             echo
-            echo "=== probe: 127.0.0.1:8091 /v1/models ==="
-            curl -s --max-time 5 http://127.0.0.1:8091/v1/models || echo "(no /v1/models on 8091)"
+            echo "=== 18080 root status ==="
+            curl -s --max-time 8 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:18080 || echo "(tunnel not connected)"
             echo
-            echo "=== probe: 172.20.0.1:9100 /v1/models ==="
-            curl -s --max-time 5 http://172.20.0.1:9100/v1/models || echo "(no /v1/models on 172.20.0.1:9100)"
+            echo "=== 18080 /api/config (Open WebUI signature) ==="
+            curl -s --max-time 8 http://127.0.0.1:18080/api/config | head -c 500 || true
             echo
-            echo "=== probe: 127.0.0.1:9100 /v1/models ==="
-            curl -s --max-time 5 http://127.0.0.1:9100/v1/models || echo "(no /v1/models on 127.0.0.1:9100)"
+            echo "=== 18080 /api/version ==="
+            curl -s --max-time 8 http://127.0.0.1:18080/api/version || true
             echo
-            echo "=== probe: 127.0.0.1:8080 /v1/models (nginx) ==="
-            curl -s --max-time 5 http://127.0.0.1:8080/v1/models | head -c 600 || true
+            echo "=== 18080 /v1/models (llama.cpp / generic OpenAI style) ==="
+            curl -s --max-time 8 http://127.0.0.1:18080/v1/models | head -c 500 || true
             echo
-            echo "=== 8080 response headers ==="
-            curl -s --max-time 5 -I http://127.0.0.1:8080 | head -6 || true
+            echo "=== 18080 /api/models status ==="
+            curl -s --max-time 8 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:18080/api/models || true
           '
