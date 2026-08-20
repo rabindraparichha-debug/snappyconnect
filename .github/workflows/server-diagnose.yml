@@ -1,0 +1,57 @@
+# Read-only server inspection over SSH, run on demand from the Actions tab.
+# Prints running containers/services and probes common local AI endpoints
+# (Ollama, Open WebUI) so they can be wired into SnappyConnect's AI settings.
+name: Diagnose server
+
+on:
+  workflow_dispatch:
+
+env:
+  VPS_IP: 145.223.18.237
+  SSHPASS: ${{ secrets.VPS_PASSWORD }}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH auth
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$VPS_IP" >> ~/.ssh/known_hosts
+          if [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+            chmod 600 ~/.ssh/vps_key
+            echo "SSH_RSH=ssh -i $HOME/.ssh/vps_key" >> "$GITHUB_ENV"
+          elif [ -n "$SSHPASS" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq sshpass
+            echo "SSH_RSH=sshpass -e ssh" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: add a VPS_SSH_KEY or VPS_PASSWORD repository secret first." >&2
+            exit 1
+          fi
+
+      - name: Inspect AI services on the server
+        run: |
+          $SSH_RSH "root@$VPS_IP" '
+            echo "=== docker containers ==="
+            docker ps --format "{{.Names}} | {{.Image}} | {{.Ports}}" 2>/dev/null || echo "(docker not installed)"
+            echo
+            echo "=== listening TCP ports ==="
+            ss -tlnp | awk "NR==1 || /LISTEN/" | head -40
+            echo
+            echo "=== running services matching ai keywords ==="
+            systemctl list-units --type=service --state=running 2>/dev/null | grep -iE "ollama|webui|open|llm|qwen" || echo "(none matched)"
+            echo
+            echo "=== probe: Ollama on 11434 ==="
+            curl -s --max-time 5 http://127.0.0.1:11434/api/tags || echo "(nothing on 11434)"
+            echo
+            echo "=== probe: port 8080 ==="
+            curl -s --max-time 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8080 || echo "(nothing on 8080)"
+            echo
+            echo "=== probe: port 3000 ==="
+            curl -s --max-time 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:3000 || echo "(nothing on 3000)"
+            echo
+            echo "=== probe: port 8000 ==="
+            curl -s --max-time 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8000 || echo "(nothing on 8000)"
+          '
