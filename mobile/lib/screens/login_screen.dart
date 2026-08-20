@@ -12,7 +12,14 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _serverController = TextEditingController(text: ApiClient.instance.baseUrl);
+  // Show the friendly domain when the stored value is just the default —
+  // "call.snappyhires.com" reads better than the full API URL, and the
+  // client normalizes either form.
+  final _serverController = TextEditingController(
+    text: ApiClient.instance.baseUrl == ApiClient.defaultBaseUrl
+        ? 'call.snappyhires.com'
+        : ApiClient.instance.baseUrl,
+  );
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _error;
@@ -90,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.url,
                   decoration: const InputDecoration(
                     labelText: 'Server URL',
-                    helperText: 'Use http://10.0.2.2:4000/api/v1 for the Android emulator',
+                    helperText: 'Leave as-is unless your admin gave you a different address',
                   ),
                 ),
                 const SizedBox(height: 16),

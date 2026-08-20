@@ -7,7 +7,9 @@ const callResult = document.getElementById('call-result');
 
 async function refresh() {
   const stored = await chrome.storage.sync.get(['apiUrl', 'token', 'user']);
-  if (stored.apiUrl) document.getElementById('api-url').value = stored.apiUrl;
+  // Pre-fill the production API so recruiters only type their credentials.
+  document.getElementById('api-url').value =
+    stored.apiUrl || 'https://call.snappyhires.com/api/v1';
   if (stored.token && stored.user) {
     loginView.classList.add('hidden');
     userView.classList.remove('hidden');
