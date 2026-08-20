@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { CallRecorder } from '@/lib/call-recorder';
+import { ensureNotificationPermission, notifyIncomingCall, Ringer } from '@/lib/ringer';
 import { getTelnyxClient } from '@/lib/telnyx-client';
 import type { User } from '@/lib/types';
 import { Button } from '@/components/ui';
@@ -23,6 +24,8 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
   const startedAtRef = useRef<string | null>(null);
   const loggedIdsRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<CallRecorder | null>(null);
+  const ringerRef = useRef(new Ringer());
+  const desktopNoteRef = useRef<Notification | null>(null);
   const [recordingEnabled, setRecordingEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -32,8 +35,13 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
 
   useEffect(() => {
     if (!capable) return;
-    let client: any;
+    let attachedClient: any = null;
     let disposed = false;
+
+    // Recruiters must hear incoming calls, not just see a card: ask for
+    // desktop-notification permission up front (login click satisfies the
+    // gesture requirement for audio later).
+    ensureNotificationPermission();
 
     const handler = (notification: any) => {
       if (notification.type !== 'callUpdate' || !notification.call) return;
@@ -41,14 +49,18 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
       if (call.direction !== 'inbound') return;
 
       switch (call.state) {
-        case 'ringing':
+        case 'ringing': {
           setIncoming(call);
-          setCaller(
-            call.options?.remoteCallerNumber ?? call.options?.callerNumber ?? 'Unknown caller',
-          );
+          const from =
+            call.options?.remoteCallerNumber ?? call.options?.callerNumber ?? 'Unknown caller';
+          setCaller(from);
           startedAtRef.current = new Date().toISOString();
+          ringerRef.current.start();
+          desktopNoteRef.current = notifyIncomingCall(from);
           break;
+        }
         case 'active':
+          stopAlerting();
           setInCall(true);
           startRecording(call);
           if (!answeredAtRef.current) {
@@ -60,6 +72,7 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
           break;
         case 'hangup':
         case 'destroy':
+          stopAlerting();
           finishCall(call);
           break;
         default:
@@ -67,28 +80,52 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
       }
     };
 
-    getTelnyxClient()
-      .then((c) => {
-        if (disposed) {
-          return;
+    /**
+     * Keep the registration alive. A dropped socket (laptop sleep, network
+     * blip, expired session) previously left the recruiter unreachable until
+     * a manual reload; now every check reconnects and re-attaches the handler.
+     */
+    const ensureConnected = async () => {
+      try {
+        const client = await getTelnyxClient();
+        if (disposed || client === attachedClient) return;
+        try {
+          attachedClient?.off('telnyx.notification', handler);
+        } catch {
+          /* noop */
         }
-        client = c;
-        c.on('telnyx.notification', handler);
-      })
-      .catch(() => {
-        /* not reachable for calls; outbound dialing will surface errors */
-      });
+        client.on('telnyx.notification', handler);
+        attachedClient = client;
+      } catch {
+        /* offline — the next tick retries */
+      }
+    };
+
+    void ensureConnected();
+    const keepAlive = setInterval(ensureConnected, 45_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void ensureConnected();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       disposed = true;
+      clearInterval(keepAlive);
+      document.removeEventListener('visibilitychange', onVisible);
       try {
-        client?.off('telnyx.notification', handler);
+        attachedClient?.off('telnyx.notification', handler);
       } catch {
         /* noop */
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capable, user?.id]);
+
+  function stopAlerting() {
+    ringerRef.current.stop();
+    desktopNoteRef.current?.close();
+    desktopNoteRef.current = null;
+  }
 
   useEffect(() => {
     if (!capable) return;
@@ -152,6 +189,7 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
 
   async function answer() {
     if (!incoming) return;
+    stopAlerting();
     try {
       const client = await getTelnyxClient();
       if (audioRef.current) client.remoteElement = audioRef.current;
@@ -162,6 +200,7 @@ export function TelnyxIncoming({ user }: { user: User | null }) {
   }
 
   function decline() {
+    stopAlerting();
     try {
       incoming?.hangup();
     } catch {
