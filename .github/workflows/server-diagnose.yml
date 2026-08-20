@@ -54,4 +54,22 @@ jobs:
             echo
             echo "=== probe: port 8000 ==="
             curl -s --max-time 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8000 || echo "(nothing on 8000)"
+            echo
+            echo "=== llm-tunnel.service unit ==="
+            systemctl cat llm-tunnel.service 2>/dev/null || echo "(no such unit)"
+            echo
+            echo "=== probe: 127.0.0.1:8091 /v1/models ==="
+            curl -s --max-time 5 http://127.0.0.1:8091/v1/models || echo "(no /v1/models on 8091)"
+            echo
+            echo "=== probe: 172.20.0.1:9100 /v1/models ==="
+            curl -s --max-time 5 http://172.20.0.1:9100/v1/models || echo "(no /v1/models on 172.20.0.1:9100)"
+            echo
+            echo "=== probe: 127.0.0.1:9100 /v1/models ==="
+            curl -s --max-time 5 http://127.0.0.1:9100/v1/models || echo "(no /v1/models on 127.0.0.1:9100)"
+            echo
+            echo "=== probe: 127.0.0.1:8080 /v1/models (nginx) ==="
+            curl -s --max-time 5 http://127.0.0.1:8080/v1/models | head -c 600 || true
+            echo
+            echo "=== 8080 response headers ==="
+            curl -s --max-time 5 -I http://127.0.0.1:8080 | head -6 || true
           '
