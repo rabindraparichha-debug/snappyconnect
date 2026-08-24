@@ -96,6 +96,19 @@ export class UsersService {
     return this.sanitize(saved);
   }
 
+  /**
+   * Lazily heal accounts created before serial extension assignment existed:
+   * give a UAE user their line the first time their dialer asks for it.
+   */
+  async ensureSipLine(userId: string): Promise<User> {
+    const user = await this.usersRepo.findOneByOrFail({ id: userId });
+    if (!user.providerConfig?.sipUsername && (user.regions ?? []).includes(Region.UAE)) {
+      await this.autoAssignSipLine(user);
+      if (user.providerConfig?.sipUsername) return this.usersRepo.save(user);
+    }
+    return user;
+  }
+
   async findAll(query: QueryUsersDto) {
     const { search, status, provider, page = 1, limit = 20 } = query;
     const qb = this.usersRepo.createQueryBuilder('user');

@@ -24,6 +24,7 @@ import { CallSource } from '../common/enums';
 import { AsteriskProvider } from '../providers/asterisk.provider';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
+import { UsersService } from '../users/users.service';
 import { CallsService } from './calls.service';
 import { CompleteRequestDto } from './dto/complete-request.dto';
 import { InitiateCallDto } from './dto/initiate-call.dto';
@@ -43,6 +44,7 @@ export class CallsController {
     private readonly asteriskProvider: AsteriskProvider,
     private readonly recordings: RecordingsService,
     private readonly settings: SettingsService,
+    private readonly users: UsersService,
   ) {}
 
   // ----- Initiation -----
@@ -76,8 +78,9 @@ export class CallsController {
 
   /** SIP connection details for the mobile app's built-in Asterisk softphone (UAE). */
   @Get('asterisk/config')
-  asteriskConfig(@CurrentUser() user: User) {
-    return this.asteriskProvider.getClientConfig(user);
+  async asteriskConfig(@CurrentUser() user: User) {
+    // Older accounts may predate serial extension assignment — heal here.
+    return this.asteriskProvider.getClientConfig(await this.users.ensureSipLine(user.id));
   }
 
   // ----- Client-reported call logs -----

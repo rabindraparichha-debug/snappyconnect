@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActivityModule } from '../activity/activity.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { DncModule } from '../dnc/dnc.module';
+import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -26,6 +27,7 @@ import { WebhooksController } from './webhooks.controller';
     ActivityModule,
     WebhooksModule,
     DncModule,
+    UsersModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
   providers: [CallsService, RecordingsService],
