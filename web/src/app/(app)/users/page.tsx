@@ -321,7 +321,9 @@ export default function UsersPage() {
                             </span>
                           )}
                         </span>
-                      ) : (
+                      ) : user.regions?.includes('usa') || user.provider === 'telnyx' ? (
+                        // Direct lines are Telnyx US numbers — only meaningful
+                        // for users who can actually call through Telnyx.
                         <Button
                           variant="ghost"
                           className="!px-2 !py-1 text-xs"
@@ -330,6 +332,8 @@ export default function UsersPage() {
                         >
                           {provisioning === user.id ? 'Assigning…' : 'Assign number'}
                         </Button>
+                      ) : (
+                        <span className="text-slate-400">—</span>
                       )}
                     </Td>
                     <Td className="capitalize">{user.role}</Td>
