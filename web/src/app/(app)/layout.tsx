@@ -439,13 +439,17 @@ function NotificationBell() {
   }, [fetchCount]);
 
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
+    function handleClickOutside(e: Event) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
   async function toggle() {
@@ -517,7 +521,7 @@ function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-xl bg-white dark:bg-slate-800 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700">
+        <div className="absolute right-0 top-full z-50 mt-2 w-[calc(100vw-1.5rem)] max-w-sm rounded-xl bg-white dark:bg-slate-800 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700 lg:left-0 lg:right-auto lg:w-80">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 px-4 py-3">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</h3>
             {count > 0 && (
