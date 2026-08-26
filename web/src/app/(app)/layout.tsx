@@ -29,12 +29,43 @@ const NAV = [
   { href: '/profile', label: 'Profile', icon: UserIcon, adminOnly: false },
 ];
 
+/**
+ * The navigation list, shared by the desktop sidebar and the mobile drawer so
+ * the two can never drift apart.
+ */
+function NavLinks({ role, pathname }: { role?: string; pathname: string }) {
+  return (
+    <nav className="flex-1 space-y-1 px-3 py-4">
+      {NAV.filter((item) => !item.adminOnly || role === 'admin').map((item) => {
+        const active = pathname.startsWith(item.href);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              active
+                ? 'bg-brand-50 text-brand-700'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
+            )}
+          >
+            <Icon className={cn('h-5 w-5', active ? 'text-brand-600' : 'text-slate-400')} />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [dialerOpen, setDialerOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -44,6 +75,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setUser(getStoredUser());
     setReady(true);
   }, [router]);
+
+  // Tapping a link in the mobile drawer navigates; the drawer must not linger.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
+  // A drawer over the page shouldn't leave the page scrolling behind it.
+  useEffect(() => {
+    if (!navOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [navOpen]);
 
   if (!ready) return null;
 
@@ -63,27 +109,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <NotificationBell />
           </div>
         </div>
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          {NAV.filter((item) => !item.adminOnly || user?.role === 'admin').map((item) => {
-            const active = pathname.startsWith(item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
-                )}
-              >
-                <Icon className={cn('h-5 w-5', active ? 'text-brand-600' : 'text-slate-400')} />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+        <NavLinks role={user?.role} pathname={pathname} />
         <div className="border-t border-slate-100 p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
@@ -110,16 +136,72 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col lg:pl-60">
         {/* Mobile top bar */}
         <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
-          <Logo />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setNavOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={navOpen}
+              className="-ml-1 rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+              </svg>
+            </button>
+            <Logo />
+          </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <NotificationBell />
-            <button onClick={logout} className="text-sm font-medium text-slate-500">
-              Sign out
-            </button>
           </div>
         </header>
-        <div className="hidden border-b border-slate-200 bg-white px-4 py-3 lg:block sm:px-6 lg:px-8">
+
+        {/* Mobile navigation drawer */}
+        {navOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <button
+              aria-label="Close menu"
+              onClick={() => setNavOpen(false)}
+              className="absolute inset-0 h-full w-full bg-slate-900/50"
+            />
+            <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r border-slate-200 bg-white shadow-xl">
+              <div className="flex h-16 items-center justify-between border-b border-slate-100 px-5">
+                <Logo />
+                <button
+                  onClick={() => setNavOpen(false)}
+                  aria-label="Close menu"
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                <NavLinks role={user?.role} pathname={pathname} />
+              </div>
+
+              <div className="border-t border-slate-100 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                    {user?.name?.charAt(0).toUpperCase() ?? '?'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">{user?.name}</p>
+                    <p className="truncate text-xs text-slate-500 capitalize">{user?.role}</p>
+                  </div>
+                  <button
+                    onClick={logout}
+                    className="rounded-md px-2 py-1 text-sm font-medium text-slate-500 hover:bg-slate-100"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
           <GlobalSearch />
         </div>
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
@@ -435,9 +517,9 @@ function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl bg-white shadow-xl ring-1 ring-slate-200">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h3 className="text-sm font-semibold text-slate-900">Notifications</h3>
+        <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-xl bg-white dark:bg-slate-800 shadow-xl ring-1 ring-slate-200 dark:ring-slate-700">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 px-4 py-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</h3>
             {count > 0 && (
               <button
                 onClick={markAllRead}
@@ -449,15 +531,15 @@ function NotificationBell() {
           </div>
           <div className="max-h-80 overflow-y-auto">
             {loaded && items.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-slate-400">No notifications yet</p>
+              <p className="px-4 py-8 text-center text-sm text-slate-400 dark:text-slate-500">No notifications yet</p>
             ) : (
               items.map((n) => (
                 <button
                   key={n.id}
                   onClick={() => !n.read && markRead(n.id)}
                   className={cn(
-                    'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50',
-                    !n.read && 'bg-brand-50/40',
+                    'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50',
+                    !n.read && 'bg-brand-50/40 dark:bg-brand-900/20',
                   )}
                 >
                   <div className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full', typeIcon[n.type] ?? 'bg-slate-100 text-slate-500')}>
@@ -472,7 +554,7 @@ function NotificationBell() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className={cn('text-sm', n.read ? 'text-slate-600' : 'font-medium text-slate-900')}>
+                    <p className={cn('text-sm', n.read ? 'text-slate-600 dark:text-slate-400' : 'font-medium text-slate-900 dark:text-white')}>
                       {n.title}
                     </p>
                     {n.body && (
