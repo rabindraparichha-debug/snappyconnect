@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../dial_intent.dart';
 import '../models.dart';
 import '../region.dart';
 
-/// Shared SMS inbox for the USA (Telnyx) number: read candidate replies and
-/// send messages. Only shown to users with USA calling access.
+/// SMS conversations on the USA (Telnyx) number: read candidate replies and
+/// send messages. A recruiter sees only their own conversations (the server
+/// scopes them). Only shown to users with USA calling access.
 class MessagesScreen extends StatefulWidget {
   const MessagesScreen({super.key});
 
@@ -133,9 +135,62 @@ class _MessagesScreenState extends State<MessagesScreen> {
         ],
       ),
     );
-    if (number != null && number.isNotEmpty && mounted) {
-      await _openThread(number);
+    if (number == null || number.isEmpty || !mounted) return;
+    if (!await _confirmContact(number)) return;
+    await _openThread(number);
+  }
+
+  /// Warns when a colleague already texted this candidate. Metadata only —
+  /// who, when, whether they replied — never the messages themselves.
+  /// Returns false when the recruiter backs out, or the number opted out.
+  Future<bool> _confirmContact(String number) async {
+    final Map<String, dynamic> status;
+    try {
+      status = await ApiClient.instance
+          .get('/sms/contact-status/${Uri.encodeComponent(number)}') as Map<String, dynamic>;
+    } catch (_) {
+      return true; // advisory only — never block messaging on a failed lookup
     }
+    if (!mounted) return false;
+
+    final optedOut = status['optedOut'] == true;
+    final others = (status['others'] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>();
+    if (!optedOut && others.isEmpty) return true;
+
+    final lines = others.map((o) {
+      final sent = o['lastSentAt'] as String?;
+      final when = sent != null ? ' ${_ago(DateTime.parse(sent))}' : '';
+      final reply = o['replied'] == true ? 'candidate replied' : 'no reply yet';
+      return '• ${o['recruiter']} texted$when — $reply';
+    }).join('\n');
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(optedOut ? 'Opted out' : 'Already contacted'),
+        content: Text(optedOut ? "This number replied STOP. It can't be messaged." : lines),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(optedOut ? 'OK' : 'Cancel'),
+          ),
+          if (!optedOut)
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Message anyway'),
+            ),
+        ],
+      ),
+    );
+    return proceed == true;
+  }
+
+  static String _ago(DateTime when) {
+    final diff = DateTime.now().difference(when.toLocal());
+    if (diff.inMinutes < 60) return '${diff.inMinutes.clamp(1, 59)} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} h ago';
+    return '${diff.inDays} d ago';
   }
 
   static String _shortTime(DateTime when) {
@@ -232,7 +287,20 @@ class _SmsThreadScreenState extends State<SmsThreadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.phoneNumber)),
+      appBar: AppBar(
+        title: Text(widget.phoneNumber),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.call, color: Color(0xFF059669)),
+            tooltip: 'Call ${widget.phoneNumber}',
+            onPressed: () {
+              // Hand the number to the dialer tab and close the thread.
+              DialIntent.call(widget.phoneNumber);
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(

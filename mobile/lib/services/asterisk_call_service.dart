@@ -124,6 +124,43 @@ class AsteriskCallService implements SipUaHelperListener {
     _helper.call(destination, voiceOnly: true);
   }
 
+  bool muted = false;
+  bool held = false;
+
+  /// Blind transfer (SIP REFER): hands the caller to [target] — a teammate's
+  /// extension (2001…), the conference room, or any dialable number. Asterisk
+  /// bridges them and our own leg ends shortly after.
+  void transfer(String target) {
+    try {
+      _call?.refer(target);
+    } catch (_) {}
+  }
+
+  void toggleMute() {
+    final call = _call;
+    if (call == null) return;
+    try {
+      muted ? call.unmute(true, false) : call.mute(true, false);
+      muted = !muted;
+    } catch (_) {}
+  }
+
+  void toggleHold() {
+    final call = _call;
+    if (call == null) return;
+    try {
+      held ? call.unhold() : call.hold();
+      held = !held;
+    } catch (_) {}
+  }
+
+  /// Send a keypad tone mid-call, so recruiters can drive an IVR menu.
+  void dtmf(String tone) {
+    try {
+      _call?.sendDTMF(tone);
+    } catch (_) {}
+  }
+
   void hangup() {
     try {
       _call?.hangup();

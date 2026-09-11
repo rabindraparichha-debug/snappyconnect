@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
+import 'services/push_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiClient.instance.init();
+  // Registers for call pushes where configured; a no-op otherwise, so the
+  // app still runs unchanged before Firebase/APNs credentials exist.
+  await PushService.init();
   runApp(const SnappyConnectApp());
 }
 

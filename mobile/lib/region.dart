@@ -26,6 +26,14 @@ class Regions {
         _ => '',
       };
 
+  /// Example number for the region, shown as the dialer's placeholder.
+  static String exampleNumber(String? region) => switch (region) {
+        india => '+91 98765 43210',
+        usa => '+1 555 000 1234',
+        uae => '+971 50 123 4567',
+        _ => '+1 555 000 1234',
+      };
+
   /// Region implied by a number's international dial code, or null when the
   /// number is in local format (e.g. UAE `05…`).
   static String? fromNumber(String phoneNumber) {

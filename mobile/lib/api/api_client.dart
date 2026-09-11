@@ -47,6 +47,22 @@ class ApiClient {
     }
   }
 
+  /// Just the host, for showing in the login field — "call.snappyhires.com"
+  /// rather than the full API URL. Matching the stored value against
+  /// [defaultBaseUrl] as a string was too brittle: a trailing slash or a
+  /// "www." prefix produced a different string, so the field fell back to
+  /// displaying the raw stored URL.
+  String get serverHost {
+    for (final candidate in [baseUrl, defaultBaseUrl]) {
+      final uri = Uri.tryParse(candidate);
+      if (uri != null && uri.host.isNotEmpty) {
+        final needsPort = uri.hasPort && uri.port != 443 && uri.port != 80;
+        return needsPort ? '${uri.host}:${uri.port}' : uri.host;
+      }
+    }
+    return 'call.snappyhires.com';
+  }
+
   /// Recruiters only need to type the domain: "call.snappyhires.com" becomes
   /// "https://call.snappyhires.com/api/v1". A full URL passes through, and an
   /// explicit http:// (local dev, emulator) is respected.

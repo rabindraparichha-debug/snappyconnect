@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../api/api_client.dart';
+import '../dial_intent.dart';
 import '../models.dart';
 import '../services/native_dialer_service.dart';
+import 'messages_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -153,14 +155,68 @@ class _CallTile extends StatelessWidget {
         ? '${call.durationSeconds ~/ 60}m ${call.durationSeconds % 60}s'
         : '';
 
+    final canText =
+        (ApiClient.instance.currentUser?.allowedRegions ?? const []).contains('usa');
+
     return ListTile(
+      onTap: () => _showActions(context, canText),
       leading: CircleAvatar(
         backgroundColor: color.withValues(alpha: 0.1),
         child: Icon(icon, color: color, size: 20),
       ),
       title: Text(call.phoneNumber, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text('$when · ${call.status.replaceAll('_', ' ')}'),
-      trailing: Text(duration, style: const TextStyle(color: Color(0xFF64748B))),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (duration.isNotEmpty)
+            Text(duration, style: const TextStyle(color: Color(0xFF64748B))),
+          IconButton(
+            icon: const Icon(Icons.call, color: Color(0xFF059669)),
+            tooltip: 'Call back',
+            onPressed: () => DialIntent.call(call.phoneNumber),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showActions(BuildContext context, bool canText) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(call.phoneNumber,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.call, color: Color(0xFF059669)),
+              title: const Text('Call'),
+              onTap: () {
+                Navigator.pop(sheet);
+                DialIntent.call(call.phoneNumber);
+              },
+            ),
+            if (canText)
+              ListTile(
+                leading: const Icon(Icons.sms_outlined, color: Color(0xFF3540C9)),
+                title: const Text('Message'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SmsThreadScreen(phoneNumber: call.phoneNumber),
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

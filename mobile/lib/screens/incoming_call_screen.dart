@@ -7,9 +7,14 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 /// returning candidate is not missed while the app is in the background.
 /// Pops with `true` (answer) or `false` (decline).
 class IncomingCallScreen extends StatefulWidget {
-  const IncomingCallScreen({super.key, required this.fromNumber});
+  const IncomingCallScreen({
+    super.key,
+    required this.fromNumber,
+    this.lineLabel = 'UAE line',
+  });
 
   final String fromNumber;
+  final String lineLabel;
 
   @override
   State<IncomingCallScreen> createState() => _IncomingCallScreenState();
@@ -72,9 +77,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'SnappyConnect · UAE line',
-                  style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                Text(
+                  'SnappyConnect · ${widget.lineLabel}',
+                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                 ),
                 const Spacer(),
                 Row(
