@@ -5,7 +5,25 @@ import { api } from '@/lib/api';
 import type { SmsLog, SmsThread } from '@/lib/types';
 import { Button, Card, EmptyState, Input, Spinner, cn } from '@/components/ui';
 
-/** Shared team inbox for the USA (Telnyx) number: read replies and send SMS. */
+/** Who else has texted a number — metadata only, never message text. */
+interface ContactActivity {
+  lastSentAt: string | null;
+  messagesSent: number;
+  replied: boolean;
+  lastReplyAt: string | null;
+}
+
+interface ContactStatus {
+  phoneNumber: string;
+  optedOut: boolean;
+  you: ContactActivity | null;
+  others: Array<ContactActivity & { recruiter: string }>;
+}
+
+/**
+ * SMS conversations on the USA (Telnyx) number. Recruiters see only their own
+ * conversations; admins see every thread.
+ */
 export default function SmsPage() {
   const [threads, setThreads] = useState<SmsThread[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -18,6 +36,7 @@ export default function SmsPage() {
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [newNumber, setNewNumber] = useState('');
+  const [contact, setContact] = useState<ContactStatus | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +78,29 @@ export default function SmsPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Warn before texting a candidate a colleague is already talking to.
+  const lookupNumber = composeOpen ? newNumber.trim() : selected;
+  useEffect(() => {
+    setContact(null);
+    if (!lookupNumber || lookupNumber.replace(/\D/g, '').length < 10) return;
+    // Debounced while typing; a slower earlier lookup must not overwrite a newer one.
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const status = await api<ContactStatus>(
+          `/sms/contact-status/${encodeURIComponent(lookupNumber)}`,
+        );
+        if (!cancelled) setContact(status);
+      } catch {
+        // Advisory only — never block messaging on a failed lookup.
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [lookupNumber]);
+
   async function send(e: FormEvent) {
     e.preventDefault();
     const to = selected ?? newNumber.trim();
@@ -87,7 +129,7 @@ export default function SmsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Messages</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Shared SMS inbox for your USA number — replies from candidates land here.
+            Your SMS conversations — candidate replies to your messages land here.
           </p>
         </div>
         <Button
@@ -163,6 +205,33 @@ export default function SmsPage() {
             <div className="border-b border-slate-100 px-4 py-3">
               <p className="text-sm font-semibold text-slate-800">{selected}</p>
               <p className="text-xs text-slate-400">{messages.length} messages</p>
+            </div>
+          ) : null}
+
+          {contact?.optedOut ? (
+            <div className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700">
+              This number opted out (replied STOP). It can&apos;t be messaged.
+            </div>
+          ) : contact && contact.others.length > 0 ? (
+            <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+              <p className="font-semibold">Already contacted</p>
+              <ul className="mt-0.5 space-y-0.5 text-xs">
+                {contact.others.map((o, i) => (
+                  <li key={`${o.recruiter}-${i}`}>
+                    {o.recruiter}
+                    {o.lastSentAt && <> texted {formatWhen(o.lastSentAt)}</>}
+                    {' — '}
+                    {o.replied ? (
+                      <span className="font-medium text-emerald-700">
+                        candidate replied
+                        {o.lastReplyAt ? ` ${formatWhen(o.lastReplyAt)}` : ''}
+                      </span>
+                    ) : (
+                      'no reply yet'
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
