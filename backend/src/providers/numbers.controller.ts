@@ -54,6 +54,16 @@ class BoardLineDto {
   phoneNumber: string;
 }
 
+class CallerNameDto {
+  /** Up to 15 letters, digits or spaces (the CNAM limit). Null or blank lists no name. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9 .&-]{0,15}$/, {
+    message: 'Caller name must be at most 15 letters, numbers or spaces',
+  })
+  name?: string | null;
+}
+
 class ExtensionDto {
   @IsString()
   userId: string;
@@ -167,7 +177,13 @@ export class NumbersController {
       if (number) owners.set(number, user);
     }
 
-    return numbers.map((n) => {
+    // Caller names live on each number at Telnyx. A failed lookup is shown
+    // as unavailable instead of breaking the whole list.
+    const callerNames = await Promise.all(
+      numbers.map((n) => this.telnyx.getCallerName(n.phoneNumber).catch(() => undefined)),
+    );
+
+    return numbers.map((n, i) => {
       const owner = owners.get(n.phoneNumber);
       return {
         phoneNumber: n.phoneNumber,
@@ -175,8 +191,24 @@ export class NumbersController {
         assignedTo: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
         isBoardLine: cfg.boardLineNumber === n.phoneNumber,
         isDefaultCallerId: cfg.fromNumber === n.phoneNumber,
+        callerName: callerNames[i] ?? null,
+        ...(callerNames[i] === undefined ? { callerNameError: true } : {}),
       };
     });
+  }
+
+  /**
+   * Set the name people see when this number calls them, or none at all.
+   * It belongs to the number, not the call — so an RPO can give a client's
+   * dedicated number that client's name. Carriers pick changes up from
+   * their caller-ID databases over a few days, not instantly.
+   */
+  @Patch(':phoneNumber/caller-name')
+  async setCallerName(@Param('phoneNumber') phoneNumber: string, @Body() dto: CallerNameDto) {
+    // Carriers display CNAM in capitals; store it the way it will appear.
+    const name = dto.name?.trim() ? dto.name.trim().toUpperCase() : null;
+    await this.telnyx.setCallerName(phoneNumber, name);
+    return { phoneNumber, callerName: name };
   }
 
   /** Numbers for sale in an area code (nothing is bought until you pick one). */

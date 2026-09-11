@@ -114,6 +114,46 @@ export class TelnyxApiService {
     }));
   }
 
+  // ----- Caller ID name (CNAM) -----
+
+  /**
+   * The name shown to people this number calls, or null when none is listed.
+   *
+   * CNAM belongs to the number, not the call: carriers look the calling
+   * number up in their CNAM databases, so the name can't change call by call.
+   */
+  async getCallerName(phoneNumber: string): Promise<string | null> {
+    const id = await this.numberId(phoneNumber);
+    const data = await this.request<any>(`/phone_numbers/${id}/voice`);
+    const listing = data?.data?.cnam_listing;
+    return listing?.cnam_listing_enabled ? (listing.cnam_listing_details ?? null) : null;
+  }
+
+  /**
+   * Set the caller name for a number, or pass null to list no name at all.
+   * Carrier databases pick changes up over several days, not instantly.
+   */
+  async setCallerName(phoneNumber: string, name: string | null): Promise<void> {
+    const id = await this.numberId(phoneNumber);
+    await this.request(`/phone_numbers/${id}/voice`, {
+      method: 'PATCH',
+      body: {
+        cnam_listing: name
+          ? { cnam_listing_enabled: true, cnam_listing_details: name }
+          : { cnam_listing_enabled: false },
+      },
+    });
+  }
+
+  private async numberId(phoneNumber: string): Promise<string> {
+    const list = await this.request<any>(
+      `/phone_numbers?filter[phone_number]=${encodeURIComponent(phoneNumber)}`,
+    );
+    const id = list?.data?.[0]?.id;
+    if (!id) throw new BadRequestException(`Number ${phoneNumber} is not on this Telnyx account.`);
+    return String(id);
+  }
+
   /** Voice+SMS numbers for sale in an area code, cheapest first. */
   async searchAvailable(
     areaCode: string,

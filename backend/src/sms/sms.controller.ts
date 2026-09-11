@@ -30,7 +30,7 @@ export class SmsController {
     return this.smsService.send(user, dto);
   }
 
-  /** Conversation list for the shared number — one entry per contact. */
+  /** Your conversations (every one, for admins) — one entry per contact. */
   @Get('threads')
   threads(@CurrentUser() user: User) {
     return this.smsService.threads(user);
@@ -40,6 +40,15 @@ export class SmsController {
   @Get('threads/:phoneNumber')
   thread(@CurrentUser() user: User, @Param('phoneNumber') phoneNumber: string) {
     return this.smsService.thread(user, phoneNumber);
+  }
+
+  /**
+   * Whether other recruiters already contacted this number and whether the
+   * candidate replied — metadata only, never message text.
+   */
+  @Get('contact-status/:phoneNumber')
+  contactStatus(@CurrentUser() user: User, @Param('phoneNumber') phoneNumber: string) {
+    return this.smsService.contactStatus(user, phoneNumber);
   }
 
   @Get()

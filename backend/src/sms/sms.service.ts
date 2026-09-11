@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
+import { toE164 } from '../contact-lists/csv.util';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookEvent } from '../webhooks/webhook.entity';
 import { DncService } from '../dnc/dnc.service';
@@ -36,13 +37,17 @@ export class SmsService {
       );
     }
 
+    // Store and compare in E.164: replies arrive as "+1…", so a number typed
+    // "630-555-1234" must become the same string, or its replies (and a STOP)
+    // would never match this conversation. Invalid input is rejected here
+    // with a readable message.
     const to = toUsE164(dto.to);
 
     // A prior STOP is binding — TCPA and the 10DLC campaign terms both
     // require it to be honored permanently, not per-thread.
-    if (this.dncService.isBlocked(dto.to) || this.dncService.isBlocked(to)) {
+    if (this.dncService.isBlocked(to)) {
       throw new BadRequestException(
-        `${dto.to} has opted out of messages (STOP) or is on the Do Not Call list.`,
+        `${to} has opted out of messages (STOP) or is on the Do Not Call list.`,
       );
     }
 
@@ -88,7 +93,7 @@ export class SmsService {
     if (!eventType?.startsWith('message.') || !payload) return;
 
     if (eventType === 'message.received') {
-      const fromNumber = payload.from?.phone_number ?? 'unknown';
+      const fromNumber = toE164(payload.from?.phone_number ?? '') || 'unknown';
 
       // Carrier-required opt-out handling: STOP (and friends) permanently
       // suppresses the number for messages and calls alike.
@@ -104,9 +109,22 @@ export class SmsService {
         }
         this.logger.log(`STOP received from ${fromNumber} — suppressed`);
       }
+      // Everyone texts from one shared company number, so a reply can't be
+      // routed by the number it arrived on. It belongs to the recruiter who
+      // last texted this contact; with no such recruiter it stays unowned and
+      // only admins see it.
+      const lastOutbound = await this.smsRepo
+        .createQueryBuilder('sms')
+        .where('sms.phoneNumber = :phone', { phone: fromNumber })
+        .andWhere('sms.direction = :dir', { dir: SmsDirection.OUTBOUND })
+        .andWhere('sms.userId IS NOT NULL')
+        .orderBy('sms.createdAt', 'DESC')
+        .getOne();
+      const ownerId = lastOutbound?.userId ?? null;
+
       const sms = await this.smsRepo.save(
         this.smsRepo.create({
-          userId: null,
+          userId: ownerId,
           phoneNumber: fromNumber,
           direction: SmsDirection.INBOUND,
           body: payload.text ?? '',
@@ -115,7 +133,7 @@ export class SmsService {
         }),
       );
 
-      this.activityService.log(ActivityType.SMS_RECEIVED, `SMS received from ${fromNumber}`, null, sms.id).catch(() => {});
+      this.activityService.log(ActivityType.SMS_RECEIVED, `SMS received from ${fromNumber}`, ownerId, sms.id).catch(() => {});
 
       this.webhooksService.dispatch(WebhookEvent.SMS_RECEIVED, {
         smsId: sms.id,
@@ -124,12 +142,16 @@ export class SmsService {
         receivedAt: sms.createdAt,
       });
 
+      // Notify the recruiter whose conversation this is, plus the admins —
+      // otherwise a recruiter would never learn a candidate had replied.
       const admins = await this.smsRepo.manager
         .getRepository(User)
         .find({ where: { role: Role.ADMIN } });
-      for (const admin of admins) {
+      const recipients = new Set(admins.map((admin) => admin.id));
+      if (ownerId) recipients.add(ownerId);
+      for (const recipientId of recipients) {
         this.notificationsService.create(
-          admin.id,
+          recipientId,
           NotificationType.INBOUND_SMS,
           `New SMS from ${fromNumber}`,
           (payload.text ?? '').slice(0, 100),
@@ -173,28 +195,38 @@ export class SmsService {
   }
 
   /**
-   * Conversation list for the shared company number: one entry per contact with
-   * the most recent message. The number is shared by the team, so inbound
-   * replies are visible to everyone with SMS access (like a shared inbox).
+   * Conversation list: one entry per contact with the most recent message.
+   *
+   * Recruiters see only their own conversations. Everyone texts from one
+   * shared company number, so replies can't be told apart by the number they
+   * arrive on — inbound messages are attributed to the recruiter who last
+   * texted that contact (see handleTelnyxWebhook). Admins see every thread,
+   * including replies from contacts nobody has messaged.
    */
   async threads(user: User): Promise<
     Array<{ phoneNumber: string; lastMessage: string; lastAt: Date; direction: SmsDirection; total: number }>
   > {
     this.assertSmsAccess(user);
-    const rows = await this.smsRepo
+    const ownerId = this.scopeFor(user);
+    const qb = this.smsRepo
       .createQueryBuilder('sms')
       .select('sms.phoneNumber', 'phoneNumber')
       .addSelect('MAX(sms.createdAt)', 'lastAt')
       .addSelect('COUNT(*)', 'total')
       .groupBy('sms.phoneNumber')
       .orderBy('MAX(sms.createdAt)', 'DESC')
-      .limit(200)
-      .getRawMany();
+      .limit(200);
+    if (ownerId) qb.where('sms.userId = :ownerId', { ownerId });
+    const rows = await qb.getRawMany();
 
     return Promise.all(
       rows.map(async (row) => {
+        // Scoped as well: on a contact two recruiters share, the preview must
+        // not show the other recruiter's latest message.
         const last = await this.smsRepo.findOne({
-          where: { phoneNumber: row.phoneNumber },
+          where: ownerId
+            ? { phoneNumber: row.phoneNumber, userId: ownerId }
+            : { phoneNumber: row.phoneNumber },
           order: { createdAt: 'DESC' },
         });
         return {
@@ -208,14 +240,76 @@ export class SmsService {
     );
   }
 
-  /** Full message history with one contact, oldest first (chat order). */
+  /**
+   * Full message history with one contact, oldest first (chat order).
+   * A recruiter gets only their own side of it — asking for another
+   * recruiter's contact returns nothing rather than their conversation.
+   */
   async thread(user: User, phoneNumber: string): Promise<SmsLog[]> {
     this.assertSmsAccess(user);
+    const ownerId = this.scopeFor(user);
+    // Clients pass the number as typed; stored numbers are E.164.
+    const phone = toE164(phoneNumber);
     return this.smsRepo.find({
-      where: { phoneNumber },
+      where: ownerId ? { phoneNumber: phone, userId: ownerId } : { phoneNumber: phone },
       order: { createdAt: 'ASC' },
       take: 500,
     });
+  }
+
+  /**
+   * Has anyone already contacted this candidate, and did they reply?
+   *
+   * Lets a recruiter see a colleague is already talking to a candidate before
+   * texting them too. Deliberately metadata only — who, when, whether they
+   * replied — never message text: conversations stay private to their
+   * recruiter.
+   */
+  async contactStatus(user: User, phoneNumber: string) {
+    this.assertSmsAccess(user);
+    const phone = toE164(phoneNumber);
+    if (!phone) throw new BadRequestException('A valid phone number is required.');
+
+    const rows: Array<{
+      userId: string;
+      name: string | null;
+      lastSentAt: Date | null;
+      sent: string;
+      lastReplyAt: Date | null;
+    }> = await this.smsRepo
+      .createQueryBuilder('sms')
+      .leftJoin('sms.user', 'u')
+      .select('sms.userId', 'userId')
+      .addSelect('MAX(u.name)', 'name')
+      .addSelect('MAX(CASE WHEN sms.direction = :dirOut THEN sms.createdAt END)', 'lastSentAt')
+      .addSelect('COUNT(CASE WHEN sms.direction = :dirOut THEN 1 END)', 'sent')
+      .addSelect('MAX(CASE WHEN sms.direction = :dirIn THEN sms.createdAt END)', 'lastReplyAt')
+      .where('sms.phoneNumber = :phone', { phone })
+      .andWhere('sms.userId IS NOT NULL')
+      .setParameters({ dirOut: SmsDirection.OUTBOUND, dirIn: SmsDirection.INBOUND })
+      .groupBy('sms.userId')
+      .getRawMany();
+
+    const activity = (r: (typeof rows)[number]) => ({
+      lastSentAt: r.lastSentAt ? new Date(r.lastSentAt) : null,
+      messagesSent: Number(r.sent),
+      replied: r.lastReplyAt != null,
+      lastReplyAt: r.lastReplyAt ? new Date(r.lastReplyAt) : null,
+    });
+    const mine = rows.find((r) => r.userId === user.id);
+    return {
+      phoneNumber: phone,
+      optedOut: this.dncService.isBlocked(phone),
+      you: mine ? activity(mine) : null,
+      others: rows
+        .filter((r) => r.userId !== user.id)
+        .map((r) => ({ recruiter: r.name ?? 'Another recruiter', ...activity(r) })),
+    };
+  }
+
+  /** Whose messages a request may see: the user's own, or everyone's for admins. */
+  private scopeFor(user: User): string | null {
+    return user.role === Role.ADMIN ? null : user.id;
   }
 
   /** SMS runs on the USA (Telnyx) line, so USA access is what grants it. */

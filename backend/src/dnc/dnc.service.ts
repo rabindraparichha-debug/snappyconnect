@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { normalizePhone } from '../contact-lists/csv.util';
+import { toE164 } from '../contact-lists/csv.util';
 import { User } from '../users/user.entity';
 import { DncEntry } from './dnc-entry.entity';
 
@@ -9,6 +9,10 @@ import { DncEntry } from './dnc-entry.entity';
  * Suppression list. Blocked numbers are held in memory as well as in the
  * database so a dial-time check — and bulk import screening — never costs a
  * query per number. The cache is refreshed on every write.
+ *
+ * Everything is compared in E.164. A STOP arrives as "+16305551234"; with
+ * punctuation-only matching, a recruiter typing "630-555-1234" slipped past
+ * the block and could text someone who had opted out.
  */
 @Injectable()
 export class DncService implements OnModuleInit {
@@ -32,7 +36,7 @@ export class DncService implements OnModuleInit {
   }
 
   async add(user: User, phoneNumber: string, reason?: string): Promise<DncEntry> {
-    const normalized = normalizePhone(phoneNumber);
+    const normalized = toE164(phoneNumber);
     if (!normalized) throw new NotFoundException('A phone number is required');
 
     const existing = await this.repo.findOne({ where: { phoneNumber: normalized } });
@@ -58,15 +62,16 @@ export class DncService implements OnModuleInit {
   async remove(id: string): Promise<void> {
     const entry = await this.findOne(id);
     await this.repo.remove(entry);
-    this.blocked.delete(entry.phoneNumber);
+    this.blocked.delete(toE164(entry.phoneNumber));
   }
 
   isBlocked(phoneNumber: string): boolean {
-    return this.blocked.has(normalizePhone(phoneNumber));
+    return this.blocked.has(toE164(phoneNumber));
   }
 
   async refresh(): Promise<void> {
     const all = await this.repo.find({ select: { phoneNumber: true } });
-    this.blocked = new Set(all.map((e) => e.phoneNumber));
+    // Normalized on load too, so entries saved in older formats still match.
+    this.blocked = new Set(all.map((e) => toE164(e.phoneNumber)));
   }
 }

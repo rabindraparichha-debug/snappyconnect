@@ -58,3 +58,22 @@ export function normalizePhone(raw: string): string {
   if (!digits) return '';
   return plus ? `+${digits}` : digits;
 }
+
+/**
+ * E.164 form ("+16305551234") for storing and comparing phone numbers.
+ *
+ * normalizePhone only strips punctuation, so "630-555-1234" and the
+ * "+16305551234" Telnyx reports on a reply never matched — a reply or a STOP
+ * could miss the conversation it belonged to. Keeps an explicit +; takes 10
+ * digits, or 11 starting with 1, as US/Canada. Under 10 digits isn't a
+ * dialable number, so it is only cleaned, not guessed at.
+ */
+export function toE164(raw: string): string {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return '';
+  if (trimmed.startsWith('+')) return `+${digits}`;
+  if (digits.length < 10) return digits;
+  if (digits.length === 10) return `+1${digits}`;
+  return `+${digits}`;
+}

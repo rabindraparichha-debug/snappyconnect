@@ -45,63 +45,67 @@ export class TelnyxProvider implements CallingProviderStrategy {
     };
   }
 
-  /** Issue a short-lived WebRTC token for the Telnyx JS/Flutter SDK. */
-  async createWebRtcToken(user: User): Promise<{ token: string; fromNumber?: string }> {
+  /**
+   * WebRTC sign-in material for the Telnyx JS/Flutter SDK.
+   *
+   * Telnyx only routes inbound calls to sessions logged in with a
+   * connection's own SIP user_name/password — token sessions register but
+   * inbound legs die with SIP 480, so a direct line never rings. The client
+   * therefore signs in with the SIP identity of the user's own credential
+   * connection (falling back to the shared WebRTC connection), and the token
+   * is kept only for older clients that don't understand login/password.
+   */
+  async createWebRtcToken(
+    user: User,
+  ): Promise<{ token?: string; login?: string; password?: string; fromNumber?: string }> {
     const cfg = await this.settings.getProviderSettings('telnyx');
     if (!cfg.apiKey) {
       throw new BadRequestException('Telnyx is not configured. Ask an admin to add credentials in Settings.');
     }
-    let credentialId: string | undefined =
-      user.providerConfig?.telnyxCredentialId || cfg.credentialId;
-    if (!credentialId) {
-      // On-demand: create a per-user telephony credential on the configured
-      // SIP connection and remember it on the user for reuse.
-      if (!cfg.connectionId) {
-        throw new BadRequestException(
-          'No Telnyx telephony credential or Connection ID configured. Ask an admin to set the Connection ID in Settings.',
-        );
-      }
-      const created = await fetch(`${TELNYX_API}/telephony_credentials`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfg.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          connection_id: String(cfg.connectionId),
-          name: `snappyconnect-${user.email}`,
-        }),
-      });
-      if (!created.ok) {
-        const body = await created.text();
-        throw new BadRequestException(
-          `Telnyx credential creation failed (${created.status}): ${body}`,
-        );
-      }
-      const data: any = await created.json();
-      credentialId = data?.data?.id;
-      if (!credentialId) {
-        throw new BadRequestException('Telnyx returned no credential id.');
-      }
-      user.providerConfig = { ...(user.providerConfig ?? {}), telnyxCredentialId: credentialId };
-      await this.usersRepo.save(user);
+
+    const connectionId: string | undefined =
+      user.providerConfig?.telnyxConnectionId || cfg.connectionId;
+    if (!connectionId) {
+      throw new BadRequestException(
+        'No Telnyx Connection ID configured. Ask an admin to set the Connection ID in Settings.',
+      );
     }
 
-    const res = await fetch(`${TELNYX_API}/telephony_credentials/${credentialId}/token`, {
-      method: 'POST',
+    const connRes = await fetch(`${TELNYX_API}/credential_connections/${connectionId}`, {
       headers: { Authorization: `Bearer ${cfg.apiKey}` },
     });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new BadRequestException(`Telnyx token request failed (${res.status}): ${body}`);
+    if (!connRes.ok) {
+      const body = await connRes.text();
+      throw new BadRequestException(
+        `Telnyx connection lookup failed (${connRes.status}): ${body}`,
+      );
     }
-    const token = await res.text();
+    const conn: any = await connRes.json();
+    const login: string | undefined = conn?.data?.user_name;
+    const password: string | undefined = conn?.data?.password;
+    if (!login || !password) {
+      throw new BadRequestException('Telnyx connection has no SIP username/password.');
+    }
+
+    // Older mobile builds hard-require a token, so keep minting one for them
+    // even though token sessions can only place calls, never receive them.
+    let token: string | undefined;
+    const credentialId: string | undefined =
+      user.providerConfig?.telnyxCredentialId || cfg.credentialId;
+    if (credentialId) {
+      const res = await fetch(`${TELNYX_API}/telephony_credentials/${credentialId}/token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+      });
+      if (res.ok) token = (await res.text()).replace(/^"|"$/g, '');
+    }
+
     // Callers must present one of the account's numbers as caller ID or
     // Telnyx rejects the outbound leg. Users may carry their own direct
     // number in providerConfig; otherwise the shared default applies.
     const fromNumber: string | undefined =
       user.providerConfig?.telnyxNumber || cfg.fromNumber;
-    return { token: token.replace(/^"|"$/g, ''), fromNumber };
+    return { token, login, password, fromNumber };
   }
 
   /** Send an SMS via the Telnyx Messages API. Returns the provider message id. */

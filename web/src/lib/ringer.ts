@@ -2,9 +2,30 @@
  * Classic dual-tone telephone ring, synthesised with WebAudio so there is no
  * audio asset to load. US ring cadence: 2 seconds on, 4 seconds off.
  *
- * Browsers allow this once the page has seen any user gesture — logging in
- * counts — so recruiters hear incoming calls without pre-enabling anything.
+ * Chrome creates AudioContexts in a "suspended" state unless the creation (or
+ * a resume) happens during a user gesture — a context made when a call
+ * arrives is silent. A single shared context is therefore created and resumed
+ * on the first click/keypress after load and reused for every ring.
  */
+let sharedContext: AudioContext | null = null;
+
+function unlockAudio(): void {
+  try {
+    sharedContext ??= new AudioContext();
+    if (sharedContext.state === 'suspended') {
+      sharedContext.resume().catch(() => undefined);
+    }
+  } catch {
+    sharedContext = null;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  for (const event of ['pointerdown', 'keydown'] as const) {
+    window.addEventListener(event, unlockAudio, { capture: true, passive: true });
+  }
+}
+
 export class Ringer {
   private context: AudioContext | null = null;
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -13,7 +34,11 @@ export class Ringer {
   start(): void {
     if (this.context) return;
     try {
-      this.context = new AudioContext();
+      unlockAudio();
+      this.context = sharedContext ?? new AudioContext();
+      if (this.context.state === 'suspended') {
+        this.context.resume().catch(() => undefined);
+      }
       const burst = () => this.ringBurst();
       burst();
       this.interval = setInterval(burst, 6000);
@@ -27,7 +52,7 @@ export class Ringer {
     this.interval = null;
     this.stopBurst?.();
     this.stopBurst = null;
-    this.context?.close().catch(() => undefined);
+    // The context is shared and stays open for the next ring.
     this.context = null;
   }
 

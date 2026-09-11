@@ -16,13 +16,19 @@ export function getFromNumber(): string | undefined {
 export async function getTelnyxClient(): Promise<any> {
   if (clientPromise) return clientPromise;
   clientPromise = (async () => {
-    const { token, fromNumber } = await api<{ token: string; fromNumber?: string }>(
-      '/calls/telnyx/token',
-      { method: 'POST' },
-    );
+    const { token, login, password, fromNumber } = await api<{
+      token?: string;
+      login?: string;
+      password?: string;
+      fromNumber?: string;
+    }>('/calls/telnyx/token', { method: 'POST' });
     cachedFromNumber = fromNumber;
     const { TelnyxRTC } = await import('@telnyx/webrtc');
-    const client: any = new TelnyxRTC({ login_token: token });
+    // Telnyx only delivers inbound calls to sessions signed in with the SIP
+    // username/password of the connection — token sessions get SIP 480.
+    const client: any = new TelnyxRTC(
+      login && password ? { login, password } : { login_token: token },
+    );
 
     await new Promise<void>((resolve, reject) => {
       const onReady = () => {
