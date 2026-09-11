@@ -4,17 +4,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
+
 import '../api/api_client.dart';
+import '../dial_intent.dart';
 import '../models.dart';
 import '../region.dart';
 import '../services/asterisk_call_service.dart';
 import '../services/call_service_keeper.dart';
+import 'ai_calls_screen.dart';
 import 'incoming_call_screen.dart';
 import '../services/native_dialer_service.dart';
+import '../services/push_service.dart';
 import '../services/telnyx_call_service.dart';
 
 class DialerScreen extends StatefulWidget {
-  const DialerScreen({super.key});
+  const DialerScreen({super.key, this.debugStartInCall = false});
+
+  /// Test-only: renders the in-call layout so the "everything on one screen,
+  /// no scrolling" requirement can be asserted without a live call.
+  @visibleForTesting
+  final bool debugStartInCall;
 
   @override
   State<DialerScreen> createState() => _DialerScreenState();
@@ -31,6 +41,9 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   String _status = '';
   bool _busy = false;
   bool _inTelnyxCall = false;
+  bool _muted = false;
+  bool _held = false;
+  bool _speakerOn = false;
   DateTime? _telnyxAnsweredAt;
   DateTime? _telnyxDialedAt;
   int _elapsed = 0;
@@ -50,11 +63,14 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   // Polling for click-to-call requests coming from the web / extension.
   Timer? _pollTimer;
+  StreamSubscription<dynamic>? _pushSub;
   final Set<String> _seenRequests = {};
 
   @override
   void initState() {
     super.initState();
+    _inTelnyxCall = widget.debugStartInCall;
+    if (widget.debugStartInCall) _status = 'In call';
     WidgetsBinding.instance.addObserver(this);
     if ((_user?.allowedRegions ?? const []).contains(Regions.india)) {
       _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollPendingRequests());
@@ -65,7 +81,114 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
       // Register right away so return calls from candidates ring this device.
       _connectAsterisk();
     }
+    if (allowed.contains(Regions.usa)) {
+      // Same for the Telnyx line: stay registered so US calls ring the phone.
+      _connectTelnyxListener();
+      _listenForPushedCalls();
+    }
     _numberController.addListener(_autoSelectRegion);
+    DialIntent.pending.addListener(_onDialIntent);
+  }
+
+  /// A number handed over from History or Messages ("call this person").
+  void _onDialIntent() {
+    final number = DialIntent.pending.value;
+    if (number == null || !mounted) return;
+    _numberController.text = number;
+  }
+
+  Future<void> _connectTelnyxListener() async {
+    try {
+      await _telnyx.listen(
+        mintToken: () async =>
+            await ApiClient.instance.post('/calls/telnyx/token') as Map<String, dynamic>,
+        onIncomingCall: _onTelnyxIncoming,
+        callerName: _user?.name ?? 'SnappyConnect',
+      );
+      await CallServiceKeeper.start(line: 'USA line');
+      if (mounted && _status.isEmpty) setState(() => _status = 'Ready for calls');
+    } catch (_) {
+      // Not fatal: the service retries, and outbound dialing reconnects too.
+    }
+  }
+
+  /// A call that arrived as a push shows the OS call screen before Dart is
+  /// involved, so answering there — not in our own UI — is what has to reach
+  /// Telnyx. Without this the native screen appears and answering does nothing.
+  void _listenForPushedCalls() {
+    _pushSub?.cancel();
+    _pushSub = PushService.listen(
+      onIncoming: (_) {
+        // CallKit is already showing the call; nothing to do until the
+        // recruiter answers or declines.
+      },
+      onAccept: (metadata) => _answerPushedCall(metadata, answer: true),
+      onDecline: (metadata) => _answerPushedCall(metadata, answer: false),
+      onEnded: () {
+        if (mounted && _inTelnyxCall) setState(() => _inTelnyxCall = false);
+      },
+    );
+  }
+
+  Future<void> _answerPushedCall(
+    Map<dynamic, dynamic> metadata, {
+    required bool answer,
+  }) async {
+    _inboundNumber = (metadata['caller_number'] as String?) ?? _inboundNumber;
+    if (answer && mounted) {
+      _telnyxDialedAt = DateTime.now();
+      _telnyxAnsweredAt = null;
+      setState(() {
+        _inTelnyxCall = true;
+        _status = 'Connecting…';
+      });
+    }
+    await _telnyx.handlePush(
+      metadata,
+      mintToken: () async =>
+          await ApiClient.instance.post('/calls/telnyx/token') as Map<String, dynamic>,
+      onState: _makeTelnyxStateHandler(_inboundNumber ?? 'Unknown', inbound: true),
+      callerName: _user?.name ?? 'SnappyConnect',
+      answer: answer,
+      decline: !answer,
+    );
+    if (!answer) await PushService.endAllCalls();
+  }
+
+  Future<void> _onTelnyxIncoming(String fromNumber) async {
+    if (!mounted) return;
+    FlutterForegroundTask.launchApp();
+    if (!mounted) return;
+    final accept = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) =>
+            IncomingCallScreen(fromNumber: fromNumber, lineLabel: 'USA line'),
+      ),
+    );
+
+    if (accept == true) {
+      _inboundNumber = fromNumber;
+      _telnyxDialedAt = DateTime.now();
+      _telnyxAnsweredAt = null;
+      setState(() {
+        _inTelnyxCall = true;
+        _status = 'Connecting…';
+      });
+      _telnyx.answerIncoming(onState: _makeTelnyxStateHandler(fromNumber, inbound: true));
+    } else {
+      _telnyx.declineIncoming();
+      try {
+        await ApiClient.instance.post('/calls/log', body: {
+          'phoneNumber': fromNumber,
+          'direction': 'inbound',
+          'status': 'missed',
+          'durationSeconds': 0,
+          'startedAt': DateTime.now().toUtc().toIso8601String(),
+          'endedAt': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (_) {}
+    }
   }
 
   /// Follow the typed number's country code unless the user picked a region.
@@ -169,9 +292,11 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    DialIntent.pending.removeListener(_onDialIntent);
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _elapsedTimer?.cancel();
+    _pushSub?.cancel();
     _telnyx.dispose();
     _asterisk.dispose();
     super.dispose();
@@ -275,8 +400,12 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   /// When the app comes back after a native call, sync the outcome.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _activeRequest != null) {
-      _completeNativeCall();
+    if (state == AppLifecycleState.resumed) {
+      // Android freezes sockets while the app is backgrounded, so the
+      // registration is often dead on return. Re-check immediately rather
+      // than waiting for the next heartbeat.
+      if (_region != Regions.uae) _telnyx.ensureConnected();
+      if (_activeRequest != null) _completeNativeCall();
     }
   }
 
@@ -372,15 +501,70 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   // ---------- Telnyx (WebRTC over the user's data connection) ----------
 
-  Future<void> _callViaTelnyx(String number) async {
+  /// Telnyx only accepts full international numbers: "646 555 4468" must go
+  /// out as "+16465554468" or the call is rejected the moment it starts.
+  static String _toUsE164(String raw) {
+    final digits = raw.replaceAll(RegExp(r'[^\d+]'), '');
+    if (digits.startsWith('+')) return digits;
+    if (digits.length == 10) return '+1$digits';
+    if (digits.length == 11 && digits.startsWith('1')) return '+$digits';
+    return '+$digits';
+  }
+
+  /// Shared UI handler for Telnyx calls (outbound and answered inbound).
+  TelnyxStateCallback _makeTelnyxStateHandler(String number, {bool inbound = false}) {
+    return (state, detail) {
+      if (!mounted) return;
+      switch (state) {
+        case TelnyxCallUiState.connecting:
+          setState(() => _status = 'Connecting…');
+        case TelnyxCallUiState.ringing:
+          setState(() => _status = 'Ringing…');
+        case TelnyxCallUiState.active:
+          _telnyxAnsweredAt ??= DateTime.now();
+          _elapsedTimer?.cancel();
+          _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+            if (mounted && _telnyxAnsweredAt != null) {
+              setState(() =>
+                  _elapsed = DateTime.now().difference(_telnyxAnsweredAt!).inSeconds);
+            }
+          });
+          setState(() => _status = 'In call');
+        case TelnyxCallUiState.ended:
+          if (inbound) {
+            _finishVoipCall(number, inbound: true);
+            _inboundNumber = null;
+          } else {
+            _finishTelnyxCall(number);
+          }
+        case TelnyxCallUiState.error:
+          if (_telnyxAnsweredAt != null) {
+            // A drop mid-call still gets logged with its duration.
+            if (inbound) {
+              _finishVoipCall(number, inbound: true);
+              _inboundNumber = null;
+            } else {
+              _finishTelnyxCall(number);
+            }
+          } else if (_inTelnyxCall) {
+            setState(() {
+              _inTelnyxCall = false;
+              _status = detail ?? 'Call error';
+            });
+            _resetCallControls();
+          }
+      }
+    };
+  }
+
+  Future<void> _callViaTelnyx(String rawNumber) async {
+    final number = _toUsE164(rawNumber);
     final mic = await Permission.microphone.request();
     if (!mic.isGranted) {
       setState(() => _status = 'Microphone permission is required for VoIP calls.');
       return;
     }
 
-    final tokenData =
-        await ApiClient.instance.post('/calls/telnyx/token') as Map<String, dynamic>;
     _telnyxDialedAt = DateTime.now();
     _telnyxAnsweredAt = null;
     setState(() {
@@ -389,38 +573,193 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     });
 
     await _telnyx.startCall(
-      sipToken: tokenData['token'] as String,
       callerName: _user?.name ?? 'SnappyConnect',
-      callerNumber: _user?.mobileNumber ?? '',
       destination: number,
-      onState: (state, detail) {
-        if (!mounted) return;
-        switch (state) {
-          case TelnyxCallUiState.connecting:
-            setState(() => _status = 'Connecting…');
-          case TelnyxCallUiState.ringing:
-            setState(() => _status = 'Ringing…');
-          case TelnyxCallUiState.active:
-            _telnyxAnsweredAt ??= DateTime.now();
-            _elapsedTimer?.cancel();
-            _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-              if (mounted && _telnyxAnsweredAt != null) {
-                setState(() =>
-                    _elapsed = DateTime.now().difference(_telnyxAnsweredAt!).inSeconds);
-              }
-            });
-            setState(() => _status = 'In call');
-          case TelnyxCallUiState.ended:
-            _finishTelnyxCall(number);
-          case TelnyxCallUiState.error:
-            setState(() {
-              _inTelnyxCall = false;
-              _status = detail ?? 'Call error';
-            });
-            _telnyx.dispose();
-        }
-      },
+      mintToken: () async =>
+          await ApiClient.instance.post('/calls/telnyx/token') as Map<String, dynamic>,
+      onState: _makeTelnyxStateHandler(number),
     );
+  }
+
+  // ---------- In-call controls ----------
+
+  void _toggleMute() {
+    if (_region == Regions.uae) {
+      _asterisk.toggleMute();
+      setState(() => _muted = _asterisk.muted);
+    } else {
+      _telnyx.toggleMute();
+      setState(() => _muted = _telnyx.muted);
+    }
+  }
+
+  void _toggleHold() {
+    if (_region == Regions.uae) {
+      _asterisk.toggleHold();
+      setState(() => _held = _asterisk.held);
+    } else {
+      _telnyx.toggleHold();
+      setState(() => _held = _telnyx.held);
+    }
+  }
+
+  void _sendDtmf(String tone) {
+    if (_region == Regions.uae) {
+      _asterisk.dtmf(tone);
+    } else {
+      _telnyx.dtmf(tone);
+    }
+  }
+
+  static String _formatDuration(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _toggleSpeaker() async {
+    final next = !_speakerOn;
+    try {
+      await Helper.setSpeakerphoneOn(next);
+      setState(() => _speakerOn = next);
+    } catch (_) {
+      // Some devices refuse before audio starts; the button just stays put.
+    }
+  }
+
+  void _resetCallControls() {
+    _muted = false;
+    _held = false;
+    if (_speakerOn) {
+      _speakerOn = false;
+      Helper.setSpeakerphoneOn(false).catchError((_) {});
+    }
+  }
+
+  /// UAE calls only: hand the caller to a teammate's extension, the
+  /// conference room, or any number (SIP REFER — Asterisk does the rest).
+  Future<void> _transferCall() async {
+    final controller = TextEditingController();
+    final target = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Transfer call'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Extension or number',
+                hintText: '2001',
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '2001–2025 ring teammates. 6999 is the team conference room — '
+              'transfer the caller there, then dial 6999 yourself for a '
+              'three-way call.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Transfer'),
+          ),
+        ],
+      ),
+    );
+    if (target == null || target.isEmpty) return;
+    _asterisk.transfer(target);
+    if (mounted) setState(() => _status = 'Transferring to $target…');
+  }
+
+  // ---------- AI calling (USA) ----------
+
+  /// Full international format for whichever region is selected.
+  String _toE164ForRegion(String raw) {
+    final digits = raw.replaceAll(RegExp(r'[^\d+]'), '');
+    if (digits.startsWith('+')) return digits;
+    if (_region == Regions.uae) {
+      if (digits.startsWith('00971')) return '+${digits.substring(2)}';
+      if (digits.startsWith('971')) return '+$digits';
+      if (digits.startsWith('0')) return '+971${digits.substring(1)}';
+      return '+971$digits';
+    }
+    return _toUsE164(raw);
+  }
+
+  Future<void> _startAiCall() async {
+    final raw = _numberController.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _status = 'Type the number the AI should call.');
+      return;
+    }
+    final number = _toE164ForRegion(raw);
+    final goalController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('AI call $number'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'The AI agent makes the call and reports the result to your '
+              'call history. You can listen in or take over from the AI Calls '
+              'page on the dashboard.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: goalController,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'What should it achieve? (optional)',
+                hintText: 'e.g. Confirm interview availability this week',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.smart_toy_outlined),
+            label: const Text('Start AI call'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _busy = true);
+    try {
+      await ApiClient.instance.post('/ai-calls', body: {
+        'phoneNumber': number,
+        if (goalController.text.trim().isNotEmpty)
+          'goalPrompt': goalController.text.trim(),
+      });
+      if (mounted) {
+        setState(() =>
+            _status = 'AI agent is calling $number — tap the robot icon (top right) to listen in.');
+      }
+    } catch (err) {
+      if (mounted) setState(() => _status = 'AI call failed: $err');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   // ---------- Asterisk (in-app SIP over encrypted WebSocket, UAE) ----------
@@ -453,6 +792,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   Future<void> _finishVoipCall(String number, {bool inbound = false}) async {
     _elapsedTimer?.cancel();
+    _resetCallControls();
     final answered = _telnyxAnsweredAt != null;
     final duration =
         answered ? DateTime.now().difference(_telnyxAnsweredAt!).inSeconds : 0;
@@ -478,6 +818,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   Future<void> _finishTelnyxCall(String number) async {
     _elapsedTimer?.cancel();
+    _resetCallControls();
     final answered = _telnyxAnsweredAt != null;
     final duration =
         answered ? DateTime.now().difference(_telnyxAnsweredAt!).inSeconds : 0;
@@ -486,7 +827,6 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
       _elapsed = 0;
       _status = answered ? 'Call ended (${duration}s)' : 'Call ended — not answered';
     });
-    _telnyx.dispose();
 
     try {
       await ApiClient.instance.post('/calls/log', body: {
@@ -509,80 +849,155 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     final providerLabel = _user?.providerLabel ?? 'Unassigned';
     final regions = _user?.allowedRegions ?? const <String>[];
 
+    final hasAi = regions.contains(Regions.usa) || regions.contains(Regions.uae);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Dialer')),
+      appBar: AppBar(
+        title: const Text('Dialer'),
+        actions: [
+          if (hasAi)
+            IconButton(
+              tooltip: 'Live AI calls — listen or take over',
+              icon: const Icon(Icons.smart_toy_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiCallsScreen()),
+              ),
+            ),
+        ],
+      ),
+      // The dialer sits inside HomeScreen's navigation bar, so the action row
+      // must be pinned rather than pushed by content: an overflowing Column
+      // used to clip "Hang up" off-screen, leaving no way to end a call.
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              if (regions.length > 1)
-                Wrap(
-                  spacing: 8,
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Column(
                   children: [
-                    for (final region in regions)
-                      ChoiceChip(
-                        label: Text(Regions.label(region)),
-                        selected: _region == region,
-                        onSelected: _inTelnyxCall
-                            ? null
-                            : (_) => setState(() {
+                    // Region picker is irrelevant mid-call and the space is
+                    // needed to keep every control on one screen.
+                    if (!_inTelnyxCall) ...[
+                      if (regions.length > 1)
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final region in regions)
+                              ChoiceChip(
+                                label: Text(Regions.label(region)),
+                                selected: _region == region,
+                                onSelected: (_) => setState(() {
                                   _region = region;
                                   _regionPinned = true;
                                 }),
+                              ),
+                          ],
+                        )
+                      else
+                        Chip(
+                          avatar: const Icon(Icons.sim_card_outlined, size: 18),
+                          label: Text(
+                              regions.isEmpty ? providerLabel : Regions.label(regions.first)),
+                        ),
+                      const SizedBox(height: 12),
+                    ],
+                    TextField(
+                      controller: _numberController,
+                      keyboardType: TextInputType.phone,
+                      textAlign: TextAlign.center,
+                      readOnly: _inTelnyxCall,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        isDense: _inTelnyxCall,
+                        hintText: Regions.exampleNumber(_region),
                       ),
+                    ),
+                    SizedBox(height: _inTelnyxCall ? 8 : 12),
+                    if (_status.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: _inTelnyxCall ? 8 : 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEEF2FF),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          _inTelnyxCall && _elapsed > 0
+                              ? '$_status · ${_formatDuration(_elapsed)}'
+                              : _status,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Color(0xFF3540C9)),
+                        ),
+                      ),
+                    SizedBox(height: _inTelnyxCall ? 6 : 12),
+                    // Mid-call the keypad sends DTMF instead of editing the
+                    // number, so recruiters can drive an IVR menu.
+                    _Keypad(
+                      enabled: true,
+                      compact: _inTelnyxCall,
+                      onKey: (key) {
+                        if (_inTelnyxCall) {
+                          _sendDtmf(key);
+                        } else {
+                          _numberController.text += key;
+                        }
+                      },
+                      onBackspace: () {
+                        if (_inTelnyxCall) return;
+                        final text = _numberController.text;
+                        if (text.isNotEmpty) {
+                          _numberController.text =
+                              text.substring(0, text.length - 1);
+                        }
+                      },
+                    ),
+                    if (_inTelnyxCall) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 18,
+                        runSpacing: 10,
+                        children: [
+                          _InCallButton(
+                            icon: _muted ? Icons.mic_off : Icons.mic,
+                            label: _muted ? 'Unmute' : 'Mute',
+                            active: _muted,
+                            onTap: _toggleMute,
+                          ),
+                          _InCallButton(
+                            icon: _speakerOn ? Icons.volume_up : Icons.volume_down,
+                            label: 'Speaker',
+                            active: _speakerOn,
+                            onTap: _toggleSpeaker,
+                          ),
+                          _InCallButton(
+                            icon: _held ? Icons.play_arrow : Icons.pause,
+                            label: _held ? 'Resume' : 'Hold',
+                            active: _held,
+                            onTap: _toggleHold,
+                          ),
+                          if (_region == Regions.uae)
+                            _InCallButton(
+                              icon: Icons.phone_forwarded,
+                              label: 'Transfer',
+                              active: false,
+                              onTap: _transferCall,
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
-                )
-              else
-                Chip(
-                  avatar: const Icon(Icons.sim_card_outlined, size: 18),
-                  label: Text(regions.isEmpty ? providerLabel : Regions.label(regions.first)),
                 ),
-              if (_region != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    Regions.hint(_region!),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                  ),
-                ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _numberController,
-                keyboardType: TextInputType.phone,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                decoration: const InputDecoration(hintText: '+91 98765 43210'),
               ),
-              const SizedBox(height: 12),
-              if (_status.isNotEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEEF2FF),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _inTelnyxCall && _elapsed > 0 ? '$_status · ${_elapsed}s' : _status,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Color(0xFF3540C9)),
-                  ),
-                ),
-              const Spacer(),
-              _Keypad(
-                enabled: !_inTelnyxCall,
-                onKey: (key) => _numberController.text += key,
-                onBackspace: () {
-                  final text = _numberController.text;
-                  if (text.isNotEmpty) {
-                    _numberController.text = text.substring(0, text.length - 1);
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
+            ),
+            // Pinned: always reachable, whatever the screen height.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: SizedBox(
                 width: double.infinity,
                 height: 54,
                 child: _inTelnyxCall
@@ -591,29 +1006,98 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
                         onPressed: () =>
                             _region == Regions.uae ? _asterisk.hangup() : _telnyx.hangup(),
                         icon: const Icon(Icons.call_end),
-                        label: const Text('Hang up'),
+                        label: Text(
+                          _elapsed > 0 ? 'Hang up · ${_formatDuration(_elapsed)}' : 'Hang up',
+                        ),
                       )
-                    : FilledButton.icon(
-                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669)),
-                        onPressed: _busy ? null : _call,
-                        icon: const Icon(Icons.call),
-                        label: Text(_busy ? 'Calling…' : 'Call'),
+                    : Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF059669)),
+                              onPressed: _busy ? null : _call,
+                              icon: const Icon(Icons.call),
+                              label: Text(_busy ? 'Calling…' : 'Call'),
+                            ),
+                          ),
+                          if (_region == Regions.usa || _region == Regions.uae) ...[
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              width: 110,
+                              child: OutlinedButton.icon(
+                                onPressed: _busy ? null : _startAiCall,
+                                icon: const Icon(Icons.smart_toy_outlined, size: 18),
+                                label: const Text('AI Call'),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
+class _InCallButton extends StatelessWidget {
+  const _InCallButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: active ? const Color(0xFF3540C9) : const Color(0xFFE2E8F0),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Icon(icon,
+                  color: active ? Colors.white : const Color(0xFF334155)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(label,
+            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+      ],
+    );
+  }
+}
+
 class _Keypad extends StatelessWidget {
-  const _Keypad({required this.onKey, required this.onBackspace, this.enabled = true});
+  const _Keypad({
+    required this.onKey,
+    required this.onBackspace,
+    this.enabled = true,
+    this.compact = false,
+  });
 
   final void Function(String) onKey;
   final VoidCallback onBackspace;
   final bool enabled;
+
+  /// Mid-call the keys send DTMF and every control has to share one screen,
+  /// so the pad tightens up and drops the (meaningless) backspace.
+  final bool compact;
 
   static const _keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 
@@ -623,25 +1107,26 @@ class _Keypad extends StatelessWidget {
       children: [
         for (var row = 0; row < 4; row++)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: EdgeInsets.symmetric(vertical: compact ? 3 : 4),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 for (var col = 0; col < 3; col++)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 8),
                     child: _key(_keys[row * 3 + col]),
                   ),
               ],
             ),
           ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: IconButton(
-            onPressed: enabled ? onBackspace : null,
-            icon: const Icon(Icons.backspace_outlined),
+        if (!compact)
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              onPressed: enabled ? onBackspace : null,
+              icon: const Icon(Icons.backspace_outlined),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -651,8 +1136,8 @@ class _Keypad extends StatelessWidget {
   Widget _key(String value) {
     final isZero = value == '0';
     return SizedBox(
-      width: 72,
-      height: 56,
+      width: compact ? 66 : 72,
+      height: compact ? 46 : 56,
       child: Material(
         color: Colors.white,
         shape: RoundedRectangleBorder(

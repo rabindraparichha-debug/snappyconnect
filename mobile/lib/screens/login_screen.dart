@@ -12,14 +12,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Show the friendly domain when the stored value is just the default —
-  // "call.snappyhires.com" reads better than the full API URL, and the
-  // client normalizes either form.
-  final _serverController = TextEditingController(
-    text: ApiClient.instance.baseUrl == ApiClient.defaultBaseUrl
-        ? 'call.snappyhires.com'
-        : ApiClient.instance.baseUrl,
-  );
+  // Always show the plain domain — "call.snappyhires.com" reads better than
+  // the full API URL, and the client normalizes either form back to it.
+  final _serverController = TextEditingController(text: ApiClient.instance.serverHost);
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _error;

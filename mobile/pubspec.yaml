@@ -1,7 +1,7 @@
 name: snappyconnect_mobile
 description: "SnappyConnect mobile app — multi-provider calling for Android & iOS."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.10.1+19
 
 environment:
   sdk: ^3.12.2
@@ -17,10 +17,19 @@ dependencies:
   permission_handler: ^12.0.0
   intl: ^0.20.0
   telnyx_webrtc: ^4.4.0
+  # CallKit + PushKit: shows the native incoming-call screen and supplies the
+  # iOS VoIP push token that Telnyx needs to wake the app.
+  flutter_callkit_incoming: ^3.1.5
+  firebase_core: ^4.1.1
+  firebase_messaging: ^16.0.2
   sip_ua: ^1.0.0
   flutter_foreground_task: ^10.0.0
   flutter_ringtone_player: ^4.0.0
   wakelock_plus: ^1.7.0
+  flutter_webrtc: ^1.5.2
+  livekit_client: ^2.11.0
+  package_info_plus: ^10.2.1
+  ota_update: ^7.0.0
 
 dev_dependencies:
   flutter_test:
@@ -29,3 +38,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+# win32 is Windows-only; wakelock_plus and device_info_plus pin different
+# majors of it. We ship Android/iOS, so forcing one version is harmless.
+dependency_overrides:
+  win32: ^6.0.1
+  device_info_plus: ^13.0.0
+  # livekit_client >=2.6 needs connectivity_plus ^7 while telnyx_webrtc pins
+  # ^6.1.2. v7 changes only Android build requirements (AGP/Gradle/Kotlin,
+  # all of which this project already exceeds) — the Dart API is unchanged, so
+  # telnyx_webrtc still compiles. Without this, iOS cannot resolve pods at all:
+  # livekit 2.5 pins WebRTC-SDK 137.7151.03 and flutter_webrtc needs 144.
+  connectivity_plus: ^7.0.0
