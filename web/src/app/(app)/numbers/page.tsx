@@ -12,6 +12,9 @@ interface AccountNumber {
   assignedTo: { id: string; name: string; email: string } | null;
   isBoardLine: boolean;
   isDefaultCallerId: boolean;
+  /** Name shown to people this number calls; null when none is listed. */
+  callerName: string | null;
+  callerNameError?: boolean;
 }
 
 interface AvailableNumber {
@@ -189,6 +192,28 @@ export default function NumbersPage() {
     }
   }
 
+  async function changeCallerName(number: AccountNumber) {
+    const entered = window.prompt(
+      `Caller name for ${number.phoneNumber} — shown to people this number calls.\n` +
+        'Up to 15 letters, numbers or spaces. Leave empty to show no name.\n' +
+        'Carriers take a few days to pick up a change.',
+      number.callerName ?? '',
+    );
+    if (entered === null) return; // cancelled
+    setBusy(number.phoneNumber);
+    try {
+      await api(`/numbers/${encodeURIComponent(number.phoneNumber)}/caller-name`, {
+        method: 'PATCH',
+        body: { name: entered.trim() || null },
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the caller name');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function saveIvr() {
     setSavingIvr(true);
     setError(null);
@@ -277,6 +302,7 @@ export default function NumbersPage() {
                   <Th>Number</Th>
                   <Th>Used for</Th>
                   <Th>Assigned to</Th>
+                  <Th>Caller name</Th>
                   <Th>Actions</Th>
                 </tr>
               </thead>
@@ -305,6 +331,25 @@ export default function NumbersPage() {
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
+                    </Td>
+                    <Td>
+                      <div className="flex items-center gap-2">
+                        {n.callerNameError ? (
+                          <span className="text-slate-400">Unavailable</span>
+                        ) : n.callerName ? (
+                          <span className="font-medium text-slate-900">{n.callerName}</span>
+                        ) : (
+                          <span className="text-slate-400">No name</span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          className="!px-2 !py-1 text-xs"
+                          disabled={busy === n.phoneNumber}
+                          onClick={() => changeCallerName(n)}
+                        >
+                          Change
+                        </Button>
+                      </div>
                     </Td>
                     <Td>
                       <div className="flex flex-wrap gap-1">
