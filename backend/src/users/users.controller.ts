@@ -59,6 +59,12 @@ export class UsersController {
     return this.provisioning.availableNumbers();
   }
 
+  /** All Telnyx numbers with who holds each — powers the admin Numbers page. */
+  @Get('telnyx/numbers')
+  numberOverview() {
+    return this.provisioning.numberOverview();
+  }
+
   @Post()
   async create(@CurrentUser() actor: User, @Ip() ip: string, @Body() dto: CreateUserDto) {
     const created = await this.usersService.create(dto);

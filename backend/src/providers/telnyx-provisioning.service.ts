@@ -46,7 +46,7 @@ export class TelnyxProvisioningService {
 
     const number = phoneNumber ?? (await this.telnyx.purchaseNumber(areaCode));
     const safeName = user.email.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
-    const connection = await this.telnyx.createCredentialConnection(`snappy-${safeName}`);
+    const connection = await this.getOrCreateConnection(`snappy-${safeName}`);
     const credential = await this.telnyx.createTelephonyCredential(
       connection.id,
       `snappy-${safeName}`,
@@ -65,6 +65,26 @@ export class TelnyxProvisioningService {
     return { phoneNumber: number, connectionId: connection.id, credentialId: credential.id };
   }
 
+  /**
+   * Telnyx connection names are account-unique, and removeDirectLine leaves the
+   * connection behind on Telnyx — so re-provisioning the same user must reuse
+   * it rather than create a duplicate (error 10015). The suffixed retry covers
+   * a create/lookup race or a lookup that missed.
+   */
+  private async getOrCreateConnection(name: string): Promise<{ id: string }> {
+    const existing = await this.telnyx.findCredentialConnectionByName(name);
+    if (existing) {
+      this.logger.log(`Reusing existing Telnyx connection "${name}" (${existing.id})`);
+      return existing;
+    }
+    try {
+      return await this.telnyx.createCredentialConnection(name);
+    } catch (err) {
+      if (!(err as Error).message?.includes('10015')) throw err;
+      return this.telnyx.createCredentialConnection(`${name}-${Date.now().toString(36)}`);
+    }
+  }
+
   /** Frees the number from the user (the number itself stays on the account). */
   async removeDirectLine(user: User): Promise<void> {
     const cfg = { ...(user.providerConfig ?? {}) };
@@ -73,6 +93,28 @@ export class TelnyxProvisioningService {
     delete cfg.telnyxCredentialId;
     user.providerConfig = cfg;
     await this.usersRepo.save(user);
+  }
+
+  /** Every number on the Telnyx account with the recruiter (if any) holding it. */
+  async numberOverview(): Promise<
+    Array<{ phoneNumber: string; assignedTo: { id: string; name: string; email: string } | null }>
+  > {
+    const [numbers, users] = await Promise.all([
+      this.telnyx.listNumbers(),
+      this.usersRepo.find(),
+    ]);
+    const byNumber = new Map(
+      users
+        .filter((u) => u.providerConfig?.telnyxNumber)
+        .map((u) => [u.providerConfig!.telnyxNumber as string, u]),
+    );
+    return numbers.map((n) => {
+      const owner = byNumber.get(n.phoneNumber);
+      return {
+        phoneNumber: n.phoneNumber,
+        assignedTo: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+      };
+    });
   }
 
   /**

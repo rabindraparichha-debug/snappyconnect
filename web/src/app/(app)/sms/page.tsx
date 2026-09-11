@@ -204,6 +204,11 @@ export default function SmsPage() {
                       {message.direction === 'outbound' && ` · ${message.status}`}
                       {message.user && ` · ${message.user.name}`}
                     </p>
+                    {message.status === 'failed' && message.error && (
+                      <p className="mt-1 rounded bg-rose-100 px-2 py-1 text-[11px] text-rose-700">
+                        {message.error}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))

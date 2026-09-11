@@ -152,6 +152,7 @@ export interface SmsLog {
   body: string;
   status: SmsStatus;
   externalId: string | null;
+  error: string | null;
   createdAt: string;
 }
 

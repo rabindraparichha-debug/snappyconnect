@@ -48,6 +48,18 @@ export class TelnyxApiService {
 
   // ----- Provisioning (per-recruiter direct lines) -----
 
+  /**
+   * Exact-name lookup so provisioning can reuse a connection left behind by an
+   * earlier attempt (Telnyx rejects duplicate connection names with error 10015).
+   */
+  async findCredentialConnectionByName(name: string): Promise<{ id: string } | null> {
+    const data = await this.request<any>(
+      `/credential_connections?filter[connection_name][contains]=${encodeURIComponent(name)}&page[size]=100`,
+    );
+    const match = (data?.data ?? []).find((c: any) => c.connection_name === name);
+    return match ? { id: String(match.id) } : null;
+  }
+
   /** Credential connection dedicated to one user, so their number can ring them. */
   async createCredentialConnection(name: string): Promise<{ id: string }> {
     // A connection without an outbound voice profile cannot place any PSTN

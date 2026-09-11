@@ -1,0 +1,67 @@
+# Deploy SnappyConnect (backend + web) to the Hostinger VPS from GitHub Actions.
+#
+# Mirrors deploy/deploy.sh, but reuses the .env files already on the server —
+# it never generates or overwrites secrets, so it is safe to run from CI.
+# First-time provisioning must still be done once via deploy/deploy.sh.
+#
+# One-time setup — add ONE of these repository secrets (repo Settings ->
+# Secrets and variables -> Actions -> New repository secret):
+#   VPS_SSH_KEY   preferred: the private key authorized on the server
+#                 (contents of ~/.ssh/snappyconnect_vps)
+#   VPS_PASSWORD  fallback: the server's root password
+# If both are set, the key wins.
+#
+# Runs automatically on every push to main, or on demand from the Actions tab
+# ("Run workflow"), where you can pick any branch to deploy.
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+env:
+  VPS_IP: 145.223.18.237
+  SSHPASS: ${{ secrets.VPS_PASSWORD }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH auth
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$VPS_IP" >> ~/.ssh/known_hosts
+          if [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+            chmod 600 ~/.ssh/vps_key
+            echo "SSH_RSH=ssh -i $HOME/.ssh/vps_key" >> "$GITHUB_ENV"
+          elif [ -n "$SSHPASS" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq sshpass
+            echo "SSH_RSH=sshpass -e ssh" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: add a VPS_SSH_KEY or VPS_PASSWORD repository secret first." >&2
+            exit 1
+          fi
+
+      - name: Sync code to server
+        run: |
+          rsync -az --delete -e "$SSH_RSH" \
+            --exclude node_modules --exclude dist --exclude .next \
+            --exclude .env --exclude .env.local --exclude tsconfig.tsbuildinfo \
+            backend web "root@$VPS_IP:/opt/snappyconnect/"
+          rsync -az -e "$SSH_RSH" \
+            deploy/server-update.sh "root@$VPS_IP:/opt/snappyconnect/"
+
+      - name: Build and restart on server
+        run: $SSH_RSH "root@$VPS_IP" "bash /opt/snappyconnect/server-update.sh"
+
+      - name: Health check
+        run: curl -fsS "http://$VPS_IP:4000/api/v1/health"

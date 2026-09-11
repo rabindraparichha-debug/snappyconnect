@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { toUsE164 } from '../common/phone.util';
 import { ActivityService } from '../activity/activity.service';
 import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -35,9 +36,11 @@ export class SmsService {
       );
     }
 
+    const to = toUsE164(dto.to);
+
     // A prior STOP is binding — TCPA and the 10DLC campaign terms both
     // require it to be honored permanently, not per-thread.
-    if (this.dncService.isBlocked(dto.to)) {
+    if (this.dncService.isBlocked(dto.to) || this.dncService.isBlocked(to)) {
       throw new BadRequestException(
         `${dto.to} has opted out of messages (STOP) or is on the Do Not Call list.`,
       );
@@ -52,25 +55,28 @@ export class SmsService {
 
     const log = this.smsRepo.create({
       userId: user.id,
-      phoneNumber: dto.to,
+      phoneNumber: to,
       direction: SmsDirection.OUTBOUND,
       body,
       status: SmsStatus.QUEUED,
     });
 
     try {
-      const { externalId } = await this.telnyxProvider.sendSms(dto.to, body);
+      const { externalId } = await this.telnyxProvider.sendSms(to, body);
       log.externalId = externalId;
       log.status = SmsStatus.SENT;
     } catch (err) {
       log.status = SmsStatus.FAILED;
+      log.error = friendlyTelnyxError(err);
       await this.smsRepo.save(log);
-      throw err;
+      // Re-throw the readable reason, not the raw Telnyx JSON blob.
+      throw new BadRequestException(`Could not send to ${to}: ${log.error}`);
     }
     const saved = await this.smsRepo.save(log);
-    this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${dto.to}`, user.id, saved.id).catch(() => {});
+    this.activityService.log(ActivityType.SMS_SENT, `SMS sent to ${to}`, user.id, saved.id).catch(() => {});
     return saved;
   }
+
 
   /**
    * Telnyx message webhook: store inbound SMS and reconcile outbound delivery
@@ -142,6 +148,10 @@ export class SmsService {
     if (status === 'delivered') log.status = SmsStatus.DELIVERED;
     else if (['sending_failed', 'delivery_failed', 'failed'].includes(status ?? '')) {
       log.status = SmsStatus.FAILED;
+      const errors = Array.isArray(payload.errors) ? payload.errors : [];
+      log.error =
+        errors.map((e: any) => e?.detail ?? e?.title).filter(Boolean).join('; ') ||
+        `Carrier reported: ${status}`;
     }
     await this.smsRepo.save(log);
   }
@@ -222,4 +232,40 @@ export class SmsService {
       );
     }
   }
+}
+
+/**
+ * Telnyx failures arrive as 'Telnyx SMS failed (4xx): {"errors":[...]}'. Pull
+ * out the human-readable detail so the UI can show why a message failed
+ * instead of the raw JSON blob.
+ */
+/** Plain-English guidance for Telnyx error codes recruiters actually hit. */
+const TELNYX_ERROR_HINTS: Record<string, string> = {
+  '10002':
+    'This is not a real, reachable phone number — check the digits (the area code may not exist), or add the country code (e.g. +371...) if it is an international number.',
+  '40010': 'US carriers require 10DLC registration for this number — register the brand/campaign in the Telnyx portal.',
+  '40011': 'US carriers require 10DLC registration for this number — register the brand/campaign in the Telnyx portal.',
+  '40310': 'The phone number is not in a valid format.',
+};
+
+function friendlyTelnyxError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const jsonStart = message.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(message.slice(jsonStart));
+      const details = (parsed?.errors ?? [])
+        .map((e: any) => {
+          const base = e?.detail ?? e?.title;
+          const hint = TELNYX_ERROR_HINTS[String(e?.code)];
+          return hint ? `${base} ${hint}` : base;
+        })
+        .filter(Boolean)
+        .join('; ');
+      if (details) return details;
+    } catch {
+      // fall through to the raw message
+    }
+  }
+  return message.slice(0, 500);
 }
