@@ -18,6 +18,7 @@ import {
 } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { DncService } from '../dnc/dnc.service';
+import { RecordingsService } from './recordings.service';
 import { ActivityService } from '../activity/activity.service';
 import { ActivityType } from '../activity/activity.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -48,6 +49,7 @@ export class CallsService {
     private readonly activityService: ActivityService,
     private readonly webhooksService: WebhooksService,
     private readonly dncService: DncService,
+    private readonly recordings: RecordingsService,
   ) {}
 
   // ---------- Initiation ----------
@@ -154,7 +156,13 @@ export class CallsService {
       user: { id: user.id, name: user.name, email: user.email },
     });
 
-    if (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER) {
+    // Only genuinely inbound calls are "missed calls" — a recruiter's own
+    // outbound attempt that nobody answered used to generate a bogus
+    // "Missed call from <the number they dialled>" notification.
+    if (
+      dto.direction === CallDirection.INBOUND &&
+      (dto.status === CallStatus.MISSED || dto.status === CallStatus.NO_ANSWER)
+    ) {
       this.notificationsService.create(
         user.id,
         NotificationType.MISSED_CALL,
@@ -294,6 +302,7 @@ export class CallsService {
     if (query.disposition) qb.andWhere('call.disposition = :disposition', { disposition: query.disposition });
     if (query.from) qb.andWhere('call.createdAt >= :from', { from: new Date(query.from) });
     if (query.to) qb.andWhere('call.createdAt <= :to', { to: new Date(query.to) });
+    if (query.hasRecording) qb.andWhere("call.recordingUrl IS NOT NULL AND call.recordingUrl <> ''");
 
     return qb;
   }
@@ -406,12 +415,12 @@ export class CallsService {
       .createQueryBuilder('call')
       .select('call.phoneNumber', 'phoneNumber')
       .addSelect('MAX(call.contactName)', 'contactName')
-      .addSelect('COUNT(*)::int', 'totalCalls')
+      .addSelect('CAST(COUNT(*) AS int)', 'totalCalls')
       .addSelect(
-        `COUNT(*) FILTER (WHERE call.status IN ('completed','answered'))::int`,
+        `CAST(COUNT(*) FILTER (WHERE call.status IN ('completed','answered')) AS int)`,
         'connectedCalls',
       )
-      .addSelect('SUM(call.durationSeconds)::int', 'totalTalkTime')
+      .addSelect('CAST(SUM(call.durationSeconds) AS int)', 'totalTalkTime')
       .addSelect('MAX(call.createdAt)', 'lastCallAt')
       .addSelect('MIN(call.createdAt)', 'firstCallAt')
       .groupBy('call.phoneNumber')
@@ -481,6 +490,13 @@ export class CallsService {
     const legId: string | undefined = payload.call_leg_id;
     if (!legId) return;
 
+    // Telnyx stores the audio and tells us where; copy it to our own storage so
+    // recordings survive the provider's retention window and stay in one place.
+    if (eventType === 'call.recording.saved') {
+      await this.saveTelnyxRecording(legId, payload);
+      return;
+    }
+
     const log = await this.callLogsRepo.findOne({ where: { externalId: legId } });
     if (!log) {
       this.logger.debug(`No call log for Telnyx leg ${legId} (${eventType})`);
@@ -507,6 +523,29 @@ export class CallsService {
       default:
         return;
     }
+    await this.callLogsRepo.save(log);
+  }
+
+  /** Download a finished Telnyx recording and attach it to the call log. */
+  private async saveTelnyxRecording(legId: string, payload: any): Promise<void> {
+    const sourceUrl: string | undefined =
+      payload.recording_urls?.mp3 ??
+      payload.recording_urls?.wav ??
+      payload.public_recording_urls?.mp3 ??
+      payload.public_recording_urls?.wav;
+    if (!sourceUrl) return;
+
+    const extension = sourceUrl.includes('.wav') ? 'wav' : 'mp3';
+    const filename = `telnyx-${legId}.${extension}`;
+    const ok = await this.recordings.downloadTo(filename, sourceUrl);
+    if (!ok) return;
+
+    const log = await this.callLogsRepo.findOne({ where: { externalId: legId } });
+    if (!log) {
+      this.logger.debug(`Recording ${filename} has no matching call log yet`);
+      return;
+    }
+    log.recordingUrl = this.recordings.urlFor(filename);
     await this.callLogsRepo.save(log);
   }
 

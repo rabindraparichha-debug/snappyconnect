@@ -3,14 +3,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActivityModule } from '../activity/activity.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { DncModule } from '../dnc/dnc.module';
+import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { SettingsModule } from '../settings/settings.module';
 import { SmsModule } from '../sms/sms.module';
 import { CallLog } from './call-log.entity';
 import { CallRequest } from './call-request.entity';
 import { User } from '../users/user.entity';
 import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
+import { RecordingsService } from './recordings.service';
 import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
 
@@ -18,14 +21,16 @@ import { WebhooksController } from './webhooks.controller';
   imports: [
     TypeOrmModule.forFeature([CallLog, CallRequest, User]),
     ProvidersModule,
+    SettingsModule,
     SmsModule,
     NotificationsModule,
     ActivityModule,
     WebhooksModule,
     DncModule,
+    UsersModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
-  providers: [CallsService],
-  exports: [CallsService],
+  providers: [CallsService, RecordingsService],
+  exports: [CallsService, RecordingsService],
 })
 export class CallsModule {}

@@ -1,9 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CallingProvider, CallSource } from '../common/enums';
-import { toUaeTrunkFormat } from '../common/region.util';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
-import { AsteriskAmiService } from './asterisk-ami.service';
 import {
   CallingProviderStrategy,
   InitiateCallInput,
@@ -11,21 +10,28 @@ import {
 } from './provider.interface';
 
 /**
- * Self-hosted Asterisk (UAE). The mobile app registers as the user's own SIP
- * account over an encrypted WebSocket (WSS + WebRTC — plain SIP is blocked by
- * UAE ISPs) and dials in-app. Asterisk forwards calls through the register
- * trunk to the on-premise UCM → Dinstar → SIM. Per-recruiter identity lives in
- * the SIP account; Asterisk always presents caller ID 1002 to the UCM (the
- * only CID its outbound route accepts).
+ * Self-hosted Asterisk (UAE). Every surface dials the candidate directly: the
+ * mobile app and the web dialer each register as the user's own SIP account
+ * over an encrypted WebSocket (WSS + WebRTC — plain SIP is blocked by UAE
+ * ISPs) and place the call themselves, so Asterisk never rings the recruiter
+ * back. Click-to-call from the Chrome extension hands off to the web dialer
+ * for the same reason. Asterisk forwards calls through the register trunk to
+ * the on-premise UCM → Dinstar → SIM. Per-recruiter identity lives in the SIP
+ * account; Asterisk always presents caller ID 1002 to the UCM (the only CID
+ * its outbound route accepts).
  */
 @Injectable()
 export class AsteriskProvider implements CallingProviderStrategy {
   readonly key = CallingProvider.ASTERISK;
 
+  private readonly webAppUrl: string;
+
   constructor(
     private readonly settings: SettingsService,
-    private readonly ami: AsteriskAmiService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.webAppUrl = config.get<string>('WEB_APP_URL', 'http://localhost:3000');
+  }
 
   async initiateCall(input: InitiateCallInput): Promise<InitiateCallResult> {
     // From the mobile app the built-in SIP dialer places the call itself.
@@ -38,8 +44,10 @@ export class AsteriskProvider implements CallingProviderStrategy {
       };
     }
 
-    // Click-to-call from the browser or Chrome extension: Asterisk rings the
-    // recruiter's own line first, then dials the candidate when they answer.
+    // Browser, Chrome extension and API callers all hand off to the web
+    // dialer, which registers the recruiter's own SIP account and invites the
+    // candidate straight from the page. Asterisk never rings the recruiter
+    // back — the softphone is the caller, matching the mobile app's behaviour.
     const sipUsername: string | undefined = input.user.providerConfig?.sipUsername;
     if (!sipUsername) {
       throw new BadRequestException(
@@ -47,27 +55,14 @@ export class AsteriskProvider implements CallingProviderStrategy {
       );
     }
 
-    try {
-      await this.ami.originate({
-        channel: `PJSIP/${sipUsername}`,
-        context: 'recruiters',
-        // International destinations need UAE's 00 access code to match the
-        // dialplan and reach the SIM in dialable form.
-        exten: toUaeTrunkFormat(input.phoneNumber),
-        callerId: `${input.user.name} <${sipUsername}>`,
-        variables: { SNAPPY_USER_ID: input.user.id },
-      });
-    } catch (err) {
-      throw new BadRequestException(
-        `Could not start the call: ${(err as Error).message}`,
-      );
-    }
+    const dialUrl = `${this.webAppUrl}/dial?number=${encodeURIComponent(input.phoneNumber)}`;
 
     return {
-      action: 'pbx_originated',
+      action: 'client_dial',
       provider: this.key,
       phoneNumber: input.phoneNumber,
-      message: `Your line (${sipUsername}) is ringing — answer it and the candidate will be dialed.`,
+      dialUrl,
+      message: 'Dial from the SnappyConnect web dialer — it will call the candidate directly.',
     };
   }
 

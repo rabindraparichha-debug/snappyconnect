@@ -24,12 +24,15 @@ import { CallSource } from '../common/enums';
 import { AsteriskProvider } from '../providers/asterisk.provider';
 import { TelnyxProvider } from '../providers/telnyx.provider';
 import { User } from '../users/user.entity';
+import { UsersService } from '../users/users.service';
 import { CallsService } from './calls.service';
 import { CompleteRequestDto } from './dto/complete-request.dto';
 import { InitiateCallDto } from './dto/initiate-call.dto';
 import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
+import { RecordingsService } from './recordings.service';
+import { SettingsService } from '../settings/settings.service';
 
 @ApiTags('Calls')
 @ApiBearerAuth()
@@ -39,6 +42,9 @@ export class CallsController {
     private readonly callsService: CallsService,
     private readonly telnyxProvider: TelnyxProvider,
     private readonly asteriskProvider: AsteriskProvider,
+    private readonly recordings: RecordingsService,
+    private readonly settings: SettingsService,
+    private readonly users: UsersService,
   ) {}
 
   // ----- Initiation -----
@@ -72,8 +78,9 @@ export class CallsController {
 
   /** SIP connection details for the mobile app's built-in Asterisk softphone (UAE). */
   @Get('asterisk/config')
-  asteriskConfig(@CurrentUser() user: User) {
-    return this.asteriskProvider.getClientConfig(user);
+  async asteriskConfig(@CurrentUser() user: User) {
+    // Older accounts may predate serial extension assignment — heal here.
+    return this.asteriskProvider.getClientConfig(await this.users.ensureSipLine(user.id));
   }
 
   // ----- Client-reported call logs -----
@@ -165,6 +172,17 @@ export class CallsController {
     return this.callsService.upcomingFollowUps(user, limit ? Number(limit) : 10);
   }
 
+  /**
+   * Whether the browser should record calls itself. Browser-side capture costs
+   * nothing (the carrier never records), so this is on unless an admin
+   * disables it. Readable by every signed-in user — the dialer needs it.
+   */
+  @Get('recording-policy')
+  async recordingPolicy() {
+    const cfg = await this.settings.getProviderSettings('telnyx');
+    return { browserRecording: cfg.browserRecording !== false };
+  }
+
   // ----- Recording upload -----
 
   @Post('log/:id/recording')
@@ -199,14 +217,20 @@ export class CallsController {
     @Param('filename') filename: string,
     @Res() res: Response,
   ) {
-    const dir = process.env.RECORDINGS_DIR || '/opt/snappyconnect/recordings';
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '');
-    const filePath = join(dir, safeName);
-    if (!existsSync(filePath)) {
+    if (this.recordings.existsLocally(safeName)) {
+      res.sendFile(this.recordings.localPath(safeName));
+      return;
+    }
+    // Older calls live only on the archive server — stream them back.
+    const stream = this.recordings.archiveStream(safeName);
+    if (!stream) {
       res.status(404).json({ message: 'Recording not found' });
       return;
     }
-    res.sendFile(filePath);
+    res.setHeader('Content-Type', this.recordings.contentType(safeName));
+    stream.pipe(res);
+    stream.on('error', () => res.end());
   }
 
   // ----- History -----

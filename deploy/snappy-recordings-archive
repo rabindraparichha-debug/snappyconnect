@@ -1,0 +1,33 @@
+#!/bin/bash
+# Copy call recordings to the storage server, then free local disk once a file
+# is safely archived. Recordings stay playable either way: the API serves local
+# copies directly and streams archived ones back over SSH.
+set -euo pipefail
+LOCAL=/opt/snappyconnect/recordings
+REMOTE_HOST=root@85.155.191.143
+REMOTE_DIR=/data/recordings
+KEY=/root/.ssh/id_storage
+KEEP_LOCAL_DAYS=7
+
+[ -d "$LOCAL" ] || exit 0
+
+# --exclude of in-flight files: Asterisk holds a recording open for the whole
+# call, so anything touched in the last two minutes is skipped this round.
+rsync -a --prune-empty-dirs \
+  --filter='-! */' \
+  -e "ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+  "$LOCAL"/ "$REMOTE_HOST:$REMOTE_DIR/" 2>/dev/null || true
+
+find "$LOCAL" -type f -mmin +2 -printf '%P\n' 2>/dev/null > /tmp/.rec-list || true
+if [ -s /tmp/.rec-list ]; then
+  rsync -a --files-from=/tmp/.rec-list \
+    -e "ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+    "$LOCAL"/ "$REMOTE_HOST:$REMOTE_DIR/"
+fi
+
+# Only delete local copies that are confirmed present on the archive.
+find "$LOCAL" -type f -mtime +$KEEP_LOCAL_DAYS -printf '%P\n' 2>/dev/null | while read -r name; do
+  if ssh -n -i "$KEY" -o BatchMode=yes "$REMOTE_HOST" "test -s $REMOTE_DIR/$name"; then
+    rm -f "$LOCAL/$name"
+  fi
+done

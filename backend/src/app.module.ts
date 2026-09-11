@@ -21,6 +21,7 @@ import { ActivityModule } from './activity/activity.module';
 import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { AiCallsModule } from './ai-calls/ai-calls.module';
 import { AuditModule } from './audit/audit.module';
 import { ContactListsModule } from './contact-lists/contact-lists.module';
 import { DncModule } from './dnc/dnc.module';
@@ -60,6 +61,7 @@ import { UsersModule } from './users/users.module';
     ScriptsModule,
     WebhooksModule,
     AuditModule,
+    AiCallsModule,
     ContactListsModule,
     DncModule,
     SeedModule,

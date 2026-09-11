@@ -307,11 +307,13 @@ export default function UsersPage() {
                       )}
                     </Td>
                     <Td>
-                      {user.providerConfig?.telnyxNumber ? (
+                      {user.providerConfig?.telnyxNumber || user.providerConfig?.sipUsername ? (
                         <span className="flex items-center gap-2">
-                          <span className="font-medium text-slate-700">
-                            {user.providerConfig.telnyxNumber}
-                          </span>
+                          {user.providerConfig.telnyxNumber && (
+                            <span className="font-medium text-slate-700">
+                              {user.providerConfig.telnyxNumber}
+                            </span>
+                          )}
                           {user.providerConfig.ivrDigit && (
                             <span
                               title="Board-line menu digit"
@@ -320,8 +322,18 @@ export default function UsersPage() {
                               ext {user.providerConfig.ivrDigit}
                             </span>
                           )}
+                          {user.providerConfig.sipUsername && (
+                            <span
+                              title="UAE PBX extension"
+                              className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700"
+                            >
+                              🇦🇪 ext {user.providerConfig.sipUsername}
+                            </span>
+                          )}
                         </span>
-                      ) : (
+                      ) : user.regions?.includes('usa') || user.provider === 'telnyx' ? (
+                        // Direct lines are Telnyx US numbers — only meaningful
+                        // for users who can actually call through Telnyx.
                         <Button
                           variant="ghost"
                           className="!px-2 !py-1 text-xs"
@@ -330,6 +342,8 @@ export default function UsersPage() {
                         >
                           {provisioning === user.id ? 'Assigning…' : 'Assign number'}
                         </Button>
+                      ) : (
+                        <span className="text-slate-400">—</span>
                       )}
                     </Td>
                     <Td className="capitalize">{user.role}</Td>

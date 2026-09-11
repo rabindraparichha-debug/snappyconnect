@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
+import { SettingsService } from '../settings/settings.service';
 import { TelnyxApiService } from './telnyx-api.service';
 
 export interface DirectLine {
@@ -22,6 +23,7 @@ export class TelnyxProvisioningService {
 
   constructor(
     private readonly telnyx: TelnyxApiService,
+    private readonly settings: SettingsService,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
   ) {}
@@ -115,15 +117,23 @@ export class TelnyxProvisioningService {
     });
   }
 
-  /** Numbers on the account that are not yet assigned to any recruiter. */
+  /**
+   * Numbers on the account that are not yet assigned to any recruiter.
+   * Parked numbers (e.g. spam-flagged, awaiting reputation clearing) are
+   * excluded so they can never be handed to a new hire by accident.
+   */
   async availableNumbers(): Promise<string[]> {
-    const [numbers, users] = await Promise.all([
+    const [numbers, users, cfg] = await Promise.all([
       this.telnyx.listNumbers(),
       this.usersRepo.find(),
+      this.settings.getProviderSettings('telnyx'),
     ]);
     const taken = new Set(
       users.map((u) => u.providerConfig?.telnyxNumber).filter(Boolean) as string[],
     );
-    return numbers.map((n) => n.phoneNumber).filter((n) => !taken.has(n));
+    const parked = new Set<string>(cfg.parkedNumbers ?? []);
+    return numbers
+      .map((n) => n.phoneNumber)
+      .filter((n) => !taken.has(n) && !parked.has(n));
   }
 }

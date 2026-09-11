@@ -18,6 +18,12 @@ export class AnalyticsController {
     return this.analyticsService.recruiterStats(user, query);
   }
 
+  /** Calls that reached voicemail — own for recruiters, everyone for admins. */
+  @Get('voicemails')
+  voicemails(@CurrentUser() user: User, @Query() query: AnalyticsQueryDto) {
+    return this.analyticsService.voicemailReport(user, query);
+  }
+
   @Get('recruiter/trend')
   recruiterTrend(
     @CurrentUser() user: User,

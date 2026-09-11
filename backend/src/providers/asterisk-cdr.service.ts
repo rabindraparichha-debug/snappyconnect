@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallLog } from '../calls/call-log.entity';
+import { RecordingsService } from '../calls/recordings.service';
 import { CallDirection, CallingProvider, CallStatus } from '../common/enums';
 import { User } from '../users/user.entity';
 import { AmiEvent, AsteriskAmiService } from './asterisk-ami.service';
@@ -27,6 +28,7 @@ export class AsteriskCdrService implements OnModuleInit {
     @InjectRepository(CallLog) private readonly callLogsRepo: Repository<CallLog>,
     @InjectRepository(User) private readonly usersRepo: Repository<User>,
     private readonly ami: AsteriskAmiService,
+    private readonly recordings: RecordingsService,
   ) {}
 
   onModuleInit(): void {
@@ -65,6 +67,13 @@ export class AsteriskCdrService implements OnModuleInit {
     const start = event.StartTime ? new Date(event.StartTime.replace(' ', 'T') + 'Z') : new Date();
     const end = event.EndTime ? new Date(event.EndTime.replace(' ', 'T') + 'Z') : null;
 
+    // MixMonitor writes `<uniqueid>.wav` while the call runs; link it if the
+    // dialplan recorded this leg.
+    const recordingFile = `ast-${uniqueId}.wav`;
+    const recordingUrl = this.recordings.existsLocally(recordingFile)
+      ? this.recordings.urlFor(recordingFile)
+      : null;
+
     await this.callLogsRepo.save(
       this.callLogsRepo.create({
         userId,
@@ -76,6 +85,7 @@ export class AsteriskCdrService implements OnModuleInit {
         startedAt: start,
         endedAt: end,
         externalId: uniqueId,
+        recordingUrl,
         metadata: {
           source: 'asterisk_cdr',
           line,

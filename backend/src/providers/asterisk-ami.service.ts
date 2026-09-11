@@ -73,6 +73,33 @@ export class AsteriskAmiService implements OnModuleDestroy {
     return this.send(fields);
   }
 
+  /**
+   * Pin extension `exten` to Dinstar SIM port `simPort` in Asterisk's own
+   * database. The dialplan reads this per call, so an assignment takes effect
+   * on the next call with no reload and no dropped calls.
+   */
+  async setSimPort(exten: string, simPort: number): Promise<AmiEvent> {
+    return this.send({
+      Action: 'DBPut',
+      Family: 'simgroup',
+      Key: exten,
+      Val: String(simPort),
+    });
+  }
+
+  /** Unpin an extension; the dialplan then falls back to the shared SIM pool. */
+  async clearSimPort(exten: string): Promise<AmiEvent> {
+    try {
+      return await this.send({ Action: 'DBDel', Family: 'simgroup', Key: exten });
+    } catch (err) {
+      // DBDel errors when the key was never set, which is the desired state.
+      if (/not exist|no such/i.test((err as Error).message)) {
+        return { Response: 'Success' } as AmiEvent;
+      }
+      throw err;
+    }
+  }
+
   /** Send an action and resolve with its Response event. */
   private async send(fields: Record<string, string>): Promise<AmiEvent> {
     await this.ensureConnected();

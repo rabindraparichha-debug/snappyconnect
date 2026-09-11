@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
 import type { Region } from '@/lib/types';
 import { Button, Card, EmptyState, Input, Label, Modal, Select, Spinner } from '@/components/ui';
+import { ScheduledMessagesCard } from '@/components/ScheduledMessagesCard';
 
 type ScheduledCallStatus = 'pending' | 'completed' | 'canceled' | 'missed';
 
@@ -344,6 +345,8 @@ export default function SchedulePage() {
           </div>
         )}
       </Card>
+
+      <ScheduledMessagesCard />
 
       <Modal
         open={modalOpen}

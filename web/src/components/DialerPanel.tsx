@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
+import { CallRecorder } from '@/lib/call-recorder';
 import { getFromNumber, getTelnyxClient } from '@/lib/telnyx-client';
 import type { InitiateCallResult } from '@/lib/types';
 import { Button, Input, cn } from '@/components/ui';
@@ -17,6 +18,30 @@ type DialState =
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 
+/**
+ * Turn a getUserMedia failure into an instruction a recruiter can act on.
+ * "Blocked" and "no microphone plugged in" need opposite fixes, and a bare
+ * "access required" sends people to re-grant a permission they already have.
+ */
+function describeMicError(err: unknown): string {
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No microphone found — plug one in (or connect a headset) and try again.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Your microphone is in use by another app (Zoom, Teams…). Close it and try again.';
+  }
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return 'Your microphone could not be opened. Pick a different input under the padlock in the address bar, or reconnect your headset.';
+  }
+  // Chrome raises NotAllowedError both when the site permission is denied and
+  // when the browser itself lacks OS-level microphone access.
+  return (
+    'Microphone blocked. Allow it from the padlock in the address bar, and check that your ' +
+    `browser has microphone access in system privacy settings. (${name || 'unknown error'})`
+  );
+}
+
 interface CallScript {
   id: string;
   title: string;
@@ -29,6 +54,16 @@ interface CallScript {
  * WebRTC; for Grandstream/Native Dialer users it asks the API to initiate
  * (PBX originate / queue to mobile) and shows the outcome.
  */
+/** Plain-English hints for the Telnyx hangup causes recruiters actually hit. */
+const CAUSE_HINTS: Record<string, string> = {
+  UNALLOCATED_NUMBER: 'This number does not exist as dialed \u2014 it may be disconnected or have a wrong/missing digit. Double-check it against the candidate\u2019s record.',
+  CALL_REJECTED: 'The carrier or the recipient\u2019s phone rejected the call.',
+  USER_BUSY: 'The line is busy \u2014 try again in a few minutes.',
+  NO_USER_RESPONSE: 'The number rang but the network got no response.',
+  NORMAL_TEMPORARY_FAILURE: 'A temporary network problem \u2014 try again.',
+  INVALID_NUMBER_FORMAT: 'The number format is invalid \u2014 use +1 followed by the 10-digit number.',
+};
+
 export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) {
   const user = getStoredUser();
   const [number, setNumber] = useState(initialNumber);
@@ -37,6 +72,64 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const [elapsed, setElapsed] = useState(0);
   const [scripts, setScripts] = useState<CallScript[]>([]);
   const [openScriptId, setOpenScriptId] = useState<string | null>(null);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
+
+  // Post-call follow-up text (USA calls): offered after no-answer/voicemail
+  // so the missed dial still leaves a trace with the candidate.
+  const [followUpPhone, setFollowUpPhone] = useState<string | null>(null);
+  const [followUpText, setFollowUpText] = useState('');
+  const [followUpState, setFollowUpState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [followUpNote, setFollowUpNote] = useState('');
+
+  const [aiDispatching, setAiDispatching] = useState(false);
+
+  /** Hand the dialled number to the AI agent instead of calling in person. */
+  async function aiCall() {
+    const target = number.trim();
+    if (!target) return;
+    if (!window.confirm(`Have the AI agent call ${target} instead of you?`)) return;
+    setAiDispatching(true);
+    setMessage('');
+    try {
+      const res = await api<{ message: string }>('/ai-calls', {
+        method: 'POST',
+        body: { phoneNumber: target },
+      });
+      setState('queued');
+      setMessage(`${res.message} Listen in or take over from the AI Calls page.`);
+      setNumber('');
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error ? err.message : 'AI call failed');
+    } finally {
+      setAiDispatching(false);
+    }
+  }
+
+  function offerFollowUp(phone: string) {
+    setFollowUpPhone(phone);
+    setFollowUpText(
+      'Hi, I just tried to reach you about a job opportunity. When would be a good time to talk?',
+    );
+    setFollowUpState('idle');
+    setFollowUpNote('');
+  }
+
+  async function sendFollowUp() {
+    if (!followUpPhone || !followUpText.trim()) return;
+    setFollowUpState('sending');
+    try {
+      await api('/sms/send', {
+        method: 'POST',
+        body: { to: followUpPhone, body: followUpText.trim() },
+      });
+      setFollowUpState('sent');
+      setFollowUpNote('Text sent — replies appear in Messages.');
+    } catch (err) {
+      setFollowUpState('error');
+      setFollowUpNote(err instanceof Error ? err.message : 'Could not send');
+    }
+  }
 
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
@@ -45,8 +138,61 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   const handlerRef = useRef<((notification: any) => void) | null>(null);
   const dialStartedAtRef = useRef<string | null>(null);
   const isSipCallRef = useRef(false);
+  const [micState, setMicState] = useState<'unknown' | 'granted' | 'prompt' | 'denied'>('unknown');
+
+  // Know the microphone situation the moment the dialer opens, and track it
+  // live, so problems surface as a banner before the first call — not as a
+  // dead-sounding call.
+  useEffect(() => {
+    let status: PermissionStatus | undefined;
+    (async () => {
+      try {
+        status = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+        if (!status) return;
+        const apply = () => setMicState(status!.state as 'granted' | 'prompt' | 'denied');
+        apply();
+        status.onchange = apply;
+      } catch {
+        // Permissions API unsupported (Safari): the pre-call check still runs.
+      }
+    })();
+    return () => {
+      if (status) status.onchange = null;
+    };
+  }, []);
+
+  /**
+   * Get a working microphone (with device fallback) or throw with an
+   * actionable message. Shared by every call path and the enable banner.
+   */
+  async function ensureMicrophone(): Promise<string | undefined> {
+    try {
+      const { acquireMicrophone } = await import('@/lib/sip-client');
+      const deviceId = await acquireMicrophone();
+      setMicState('granted');
+      return deviceId;
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') setMicState('denied');
+      throw new Error(describeMicError(err));
+    }
+  }
+
+  async function enableMicClicked() {
+    setMessage('');
+    try {
+      await ensureMicrophone();
+      setMessage('Microphone ready — you can place calls.');
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error ? err.message : 'Microphone unavailable');
+    }
+  }
+  const recorderRef = useRef<CallRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heldRef = useRef(false);
 
   useEffect(() => {
     setNumber(initialNumber);
@@ -57,6 +203,17 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       .then(setScripts)
       .catch(() => setScripts([]));
   }, []);
+
+  useEffect(() => {
+    api<{ browserRecording: boolean }>('/calls/recording-policy')
+      .then((policy) => setRecordingEnabled(policy.browserRecording))
+      .catch(() => setRecordingEnabled(false));
+  }, []);
+
+  // Click-to-call pre-fills the number and stops there. Dialling on arrival
+  // was tried and reverted: the page is opened programmatically, so there is
+  // no user gesture behind it and the browser refuses the microphone even when
+  // the recruiter has granted it. Their press of Call carries the gesture.
 
   useEffect(() => {
     return () => {
@@ -75,6 +232,32 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       }
     }
     handlerRef.current = null;
+  }
+
+  /**
+   * Keypad entry. Holding "0" types "+" instead, the way phone dialers do —
+   * recruiters need it for international numbers (+91…, +971…).
+   */
+  function pressKey(key: string) {
+    if (heldRef.current) {
+      heldRef.current = false;
+      return;
+    }
+    setNumber((n) => n + key);
+  }
+
+  function startHold(key: string) {
+    if (key !== '0') return;
+    heldRef.current = false;
+    holdRef.current = setTimeout(() => {
+      heldRef.current = true;
+      setNumber((n) => n + '+');
+    }, 400);
+  }
+
+  function cancelHold() {
+    if (holdRef.current) clearTimeout(holdRef.current);
+    holdRef.current = null;
   }
 
   function startTimer() {
@@ -102,6 +285,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     if (!target) return;
     setMessage('');
     setElapsed(0);
+    setFollowUpPhone(null);
 
     // Telnyx calls are placed in-browser and never hit the server-side guard,
     // so the suppression list is checked here for every route.
@@ -164,12 +348,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     isSipCallRef.current = true;
 
     try {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        throw new Error('Microphone access is required to place a call.');
-      }
+      const micDeviceId = await ensureMicrophone();
 
       setMessage('Connecting to your SIP line…');
       const { placeSipCall } = await import('@/lib/sip-client');
@@ -190,7 +369,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           setState('error');
           setMessage(msg);
         },
-      });
+      }, micDeviceId);
       // Reuse callRef so the shared Hang up button drives this call too.
       callRef.current = call;
     } catch (err) {
@@ -234,17 +413,32 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     isSipCallRef.current = false;
   }
 
+  /**
+   * Telnyx routes strictly on E.164; numbers pasted from sheets and ATS
+   * exports arrive as "203-555-0148", "1 (203) 555-0148", "0044…" and so on.
+   * Dialing those verbatim comes back as UNALLOCATED_NUMBER even when the
+   * number itself is fine.
+   */
+  function toE164(raw: string): string {
+    let n = raw.replace(/[^\d+]/g, '');
+    if (n.startsWith('00')) n = '+' + n.slice(2);
+    if (n.startsWith('+')) return n;
+    if (/^1\d{10}$/.test(n)) return '+' + n;      // 1 + US 10-digit
+    if (/^\d{10}$/.test(n)) return '+1' + n;      // bare US 10-digit
+    if (/^\d{11,15}$/.test(n)) return '+' + n;    // country code included
+    return n;
+  }
+
   async function placeTelnyxCall(target: string) {
+    target = toE164(target);
     setState('connecting');
     setMessage('Requesting microphone access…');
     dialStartedAtRef.current = new Date().toISOString();
     try {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        // mic prompt may fail in some browsers; Telnyx SDK will retry internally
-      }
+      // A failed microphone must stop the call with a real explanation —
+      // swallowing it here produced instant dead calls logged as no_answer,
+      // with the recruiter never told why.
+      await ensureMicrophone();
 
       setMessage('Connecting to Telnyx…');
       const client = await getTelnyxClient();
@@ -280,6 +474,7 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
             if (!answeredAtRef.current) startTimer();
             setState('active');
             setMessage('In call');
+            startRecording(call);
             break;
           case 'hangup':
           case 'destroy':
@@ -297,6 +492,21 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
     }
   }
 
+  /**
+   * Capture the call in the browser (free) rather than paying the carrier to
+   * record. Needs both streams, so it starts once the call is answered.
+   */
+  function startRecording(call: any) {
+    if (recorderRef.current || !recordingEnabled) return;
+    const remote: MediaStream | null =
+      call?.remoteStream ?? (audioRef.current?.srcObject as MediaStream | null) ?? null;
+    const local: MediaStream | null = call?.localStream ?? null;
+    const recorder = new CallRecorder();
+    if (recorder.start(local, remote)) {
+      recorderRef.current = recorder;
+    }
+  }
+
   async function finishTelnyxCall(target: string) {
     // hangup and destroy both arrive for one call — log it once.
     if (finishedRef.current) return;
@@ -307,14 +517,38 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
       ? Math.floor((Date.now() - (answeredAtRef.current as number)) / 1000)
       : 0;
 
+    // Telnyx says WHY a call ended (rejected, busy, invalid number…) — an
+    // unanswered instant failure is a different problem from ringing out,
+    // and hiding the cause made those indistinguishable.
+    const cause: string | undefined =
+      callRef.current?.cause ?? callRef.current?.hangupCause ?? undefined;
+    const failedInstantly = !answered && duration === 0 && cause &&
+      !['NORMAL_CLEARING', 'ORIGINATOR_CANCEL'].includes(cause);
+
     setState('ended');
-    setMessage(answered ? `Call ended (${duration}s)` : 'Call ended — not answered');
+    setMessage(
+      answered
+        ? `Call ended (${duration}s)`
+        : failedInstantly
+          ? `Call failed — carrier says: ${cause}. ${CAUSE_HINTS[cause] ?? 'The number may be blocking or unreachable.'}`
+          : 'Call ended — not answered',
+    );
+
+    // No answer, or a suspiciously short "answer" (usually voicemail): offer
+    // a one-tap follow-up text so the attempt still reaches the candidate.
+    if (!failedInstantly && (!answered || duration <= 20)) {
+      offerFollowUp(target);
+    }
 
     const externalId =
       callRef.current?.telnyxIDs?.telnyxLegId ?? callRef.current?.id ?? undefined;
 
+    // Stop the recorder first so the audio is ready to attach to the log.
+    const audio = await recorderRef.current?.stop().catch(() => null);
+    recorderRef.current = null;
+
     try {
-      await api('/calls/log', {
+      const log = await api<{ id: string }>('/calls/log', {
         method: 'POST',
         body: {
           phoneNumber: target,
@@ -324,8 +558,18 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           startedAt: dialStartedAtRef.current ?? undefined,
           endedAt: new Date().toISOString(),
           externalId,
+          notes: cause && cause !== 'NORMAL_CLEARING' ? `Hangup cause: ${cause}` : undefined,
         },
       });
+      if (audio && log?.id) {
+        setMessage('Saving recording…');
+        const saved = await CallRecorder.upload(log.id, audio);
+        setMessage(
+          saved
+            ? `Call ended (${duration}s) · recording saved`
+            : `Call ended (${duration}s) · recording could not be saved`,
+        );
+      }
     } catch {
       /* logging failure shouldn't break the UI */
     }
@@ -354,6 +598,23 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
   return (
     <div className="w-full">
       <audio ref={audioRef} autoPlay />
+
+      {micState === 'prompt' && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          <span>Calls need your microphone.</span>
+          <Button onClick={enableMicClicked} className="!px-3 !py-1.5 text-xs shrink-0">
+            Enable microphone
+          </Button>
+        </div>
+      )}
+      {micState === 'denied' && (
+        <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
+          Microphone access is blocked, so calls can&apos;t work. Click the padlock in the
+          address bar → allow Microphone, then reload. On Mac also check System Settings →
+          Privacy &amp; Security → Microphone for your browser.
+        </div>
+      )}
+
       <div className="mb-3">
         <Input
           type="tel"
@@ -370,10 +631,20 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
           <button
             key={key}
             disabled={busy}
-            onClick={() => setNumber((n) => n + key)}
-            className="rounded-lg bg-slate-100 py-2.5 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-40"
+            onClick={() => pressKey(key)}
+            onPointerDown={() => startHold(key)}
+            onPointerUp={cancelHold}
+            onPointerLeave={cancelHold}
+            onContextMenu={(e) => key === '0' && e.preventDefault()}
+            title={key === '0' ? 'Hold for +' : undefined}
+            className="relative rounded-lg bg-slate-100 py-2.5 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-40"
           >
             {key}
+            {key === '0' && (
+              <span className="absolute right-2 top-1.5 text-[10px] font-medium text-slate-400">
+                +
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -394,11 +665,59 @@ export function DialerPanel({ initialNumber = '' }: { initialNumber?: string }) 
         </p>
       )}
 
+      {followUpPhone && state === 'ended' && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            📨 Couldn&apos;t reach them? Send a quick text
+          </p>
+          {followUpState === 'sent' ? (
+            <p className="mt-1 text-sm text-emerald-600">{followUpNote}</p>
+          ) : (
+            <>
+              <textarea
+                value={followUpText}
+                onChange={(e) => setFollowUpText(e.target.value.slice(0, 135))}
+                rows={3}
+                className="mt-2 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-600"
+              />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-xs text-slate-400">
+                  {followUpText.length}/135 · one segment · &quot;Reply STOP to opt out&quot; added
+                </span>
+                <Button
+                  onClick={sendFollowUp}
+                  disabled={followUpState === 'sending' || !followUpText.trim()}
+                  className="!px-3 !py-1.5 text-xs"
+                >
+                  {followUpState === 'sending' ? 'Sending…' : `Text ${followUpPhone}`}
+                </Button>
+              </div>
+              {followUpState === 'error' && (
+                <p className="mt-1 text-xs text-red-600">{followUpNote}</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2">
         {!busy ? (
-          <Button onClick={placeCall} className="w-full bg-emerald-600 hover:bg-emerald-700">
-            <PhoneIcon /> Call
-          </Button>
+          <>
+            <Button onClick={placeCall} className="w-full bg-emerald-600 hover:bg-emerald-700">
+              <PhoneIcon /> Call
+            </Button>
+            {(user?.regions?.includes('usa') || user?.regions?.includes('uae')) && (
+              <Button
+                variant="secondary"
+                onClick={aiCall}
+                disabled={aiDispatching || !number.trim()}
+                title="The AI agent calls this number and holds the conversation — listen in or take over from the AI Calls page"
+                className="shrink-0"
+              >
+                {aiDispatching ? '…' : '🤖 AI'}
+              </Button>
+            )}
+          </>
         ) : (
           <Button variant="danger" onClick={hangup} className="w-full">
             Hang up

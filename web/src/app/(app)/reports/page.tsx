@@ -9,6 +9,10 @@ interface TeamStats {
   totalCalls: number;
   connectedCalls: number;
   connectionRate: number;
+  aiCalls?: number;
+  recruiterCalls?: number;
+  aiRecruiters?: number;
+  aiVoicemails?: number;
   averageDurationSeconds: number;
   totalTalkTimeSeconds: number;
   byRecruiter: { userId: string; totalCalls: number; connectedCalls: number; talkTimeSeconds: number }[];
@@ -23,10 +27,24 @@ interface LeaderboardEntry {
   name: string;
   email: string;
   totalCalls: number;
+  humanCalls: number;
   connectedCalls: number;
   talkTimeSeconds: number;
   uniqueContacts: number;
+  aiCalls: number;
+  aiAnswered: number;
+  aiVoicemails: number;
+  aiNotAnswered: number;
   connectionRate: number;
+}
+
+interface VoicemailRow {
+  id: string;
+  phoneNumber: string;
+  contactName: string | null;
+  recruiter: string;
+  at: string;
+  durationSeconds: number;
 }
 
 interface TrendPoint {
@@ -80,6 +98,7 @@ export default function ReportsPage() {
   });
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [stats, setStats] = useState<TeamStats | null>(null);
+  const [voicemails, setVoicemails] = useState<VoicemailRow[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,15 +115,17 @@ export default function ReportsPage() {
     const fetches: Promise<any>[] = [
       api(endpoint, { query: q }),
       api(trendEndpoint, { query: { ...q, granularity: 'day' } }),
+      api('/analytics/voicemails', { query: q }).catch(() => []),
     ];
     if (isAdmin) {
       fetches.push(api('/analytics/team/leaderboard', { query: { ...q, limit: 20 } }));
     }
 
     Promise.all(fetches)
-      .then(([s, t, lb]) => {
+      .then(([s, t, vm, lb]) => {
         setStats(s);
         setTrend(t);
+        setVoicemails(vm ?? []);
         if (lb) setLeaderboard(lb);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
@@ -182,9 +203,9 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
     }
 
     if (leaderboard.length > 0) {
-      printWindow.document.write(`<h2>Team Leaderboard</h2><table><thead><tr><th>#</th><th>Recruiter</th><th>Total</th><th>Connected</th><th>Rate</th><th>Talk Time</th><th>Contacts</th></tr></thead><tbody>`);
+      printWindow.document.write(`<h2>Team Leaderboard</h2><table><thead><tr><th>#</th><th>Recruiter</th><th>Total</th><th>Human</th><th>Connected</th><th>Rate</th><th>Talk Time</th><th>Contacts</th><th>AI Calls</th><th>AI Answered</th><th>AI Voicemail</th><th>AI No Answer</th></tr></thead><tbody>`);
       for (const e of leaderboard) {
-        printWindow.document.write(`<tr><td>${e.rank}</td><td>${e.name}</td><td>${e.totalCalls}</td><td>${e.connectedCalls}</td><td>${e.connectionRate}%</td><td>${formatDuration(e.talkTimeSeconds)}</td><td>${e.uniqueContacts}</td></tr>`);
+        printWindow.document.write(`<tr><td>${e.rank}</td><td>${e.name}</td><td>${e.totalCalls}</td><td>${e.humanCalls}</td><td>${e.connectedCalls}</td><td>${e.connectionRate}%</td><td>${formatDuration(e.talkTimeSeconds)}</td><td>${e.uniqueContacts}</td><td>${e.aiCalls}</td><td>${e.aiAnswered}</td><td>${e.aiVoicemails}</td><td>${e.aiNotAnswered}</td></tr>`);
       }
       printWindow.document.write(`</tbody></table>`);
     }
@@ -267,6 +288,53 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
         </div>
       )}
 
+      {/* AI calling */}
+      {stats && (stats.aiCalls ?? 0) >= 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-semibold text-slate-900">AI Calling</h2>
+          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatCard label="AI Calls" value={stats.aiCalls ?? 0} accent="blue" />
+            <StatCard label="Recruiter Calls" value={stats.recruiterCalls ?? stats.totalCalls} />
+            {isAdmin && <StatCard label="Recruiters Using AI" value={stats.aiRecruiters ?? 0} accent="emerald" />}
+            <StatCard label="Voicemails Reached" value={stats.aiVoicemails ?? 0} accent="amber" />
+          </div>
+        </>
+      )}
+
+      {/* Voicemail report */}
+      {voicemails.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-semibold text-slate-900">Voicemails Reached</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Calls where the AI hit voicemail and left a message — worth a follow-up.
+          </p>
+          <Card className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Number</th>
+                  {isAdmin && <th className="px-4 py-3">Recruiter</th>}
+                  <th className="px-4 py-3">When</th>
+                  <th className="px-4 py-3">Duration</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {voicemails.map((v) => (
+                  <tr key={v.id}>
+                    <td className="px-4 py-2.5 font-medium text-slate-900">{v.contactName || '—'}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-slate-600">{v.phoneNumber}</td>
+                    {isAdmin && <td className="px-4 py-2.5 text-slate-600">{v.recruiter}</td>}
+                    <td className="px-4 py-2.5 text-slate-500">{new Date(v.at).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-slate-500">{formatDuration(v.durationSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+
       {/* Trend chart */}
       {trend.length > 1 && (
         <>
@@ -330,10 +398,15 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
                     <Th>#</Th>
                     <Th>Recruiter</Th>
                     <Th>Total Calls</Th>
+                    <Th>Human</Th>
                     <Th>Connected</Th>
                     <Th>Rate</Th>
                     <Th>Talk Time</Th>
                     <Th>Contacts</Th>
+                    <Th>AI Calls</Th>
+                    <Th>AI Answered</Th>
+                    <Th>AI Voicemail</Th>
+                    <Th>AI No Answer</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -354,10 +427,15 @@ td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
                         <p className="text-xs text-slate-400">{entry.email}</p>
                       </Td>
                       <Td className="font-semibold tabular-nums">{entry.totalCalls}</Td>
+                      <Td className="tabular-nums">{entry.humanCalls}</Td>
                       <Td className="tabular-nums">{entry.connectedCalls}</Td>
                       <Td className="tabular-nums">{entry.connectionRate}%</Td>
                       <Td className="tabular-nums">{formatDuration(entry.talkTimeSeconds)}</Td>
                       <Td className="tabular-nums">{entry.uniqueContacts}</Td>
+                      <Td className="tabular-nums">{entry.aiCalls}</Td>
+                      <Td className="tabular-nums text-emerald-600">{entry.aiAnswered}</Td>
+                      <Td className="tabular-nums text-amber-600">{entry.aiVoicemails}</Td>
+                      <Td className="tabular-nums text-slate-400">{entry.aiNotAnswered}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -376,6 +454,7 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
   const colors: Record<string, string> = {
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     blue: 'bg-blue-50 text-blue-700 border-blue-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
   };
   return (
     <div className={`rounded-lg border p-4 ${colors[accent ?? ''] ?? 'bg-white border-slate-200'}`}>

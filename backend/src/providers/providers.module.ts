@@ -9,13 +9,17 @@ import { AsteriskCdrService } from './asterisk-cdr.service';
 import { AsteriskProvider } from './asterisk.provider';
 import { GrandstreamProvider } from './grandstream.provider';
 import { NativeDialerProvider } from './native-dialer.provider';
+import { RecordingsService } from '../calls/recordings.service';
+import { NumbersController } from './numbers.controller';
 import { ProvidersService } from './providers.service';
+import { SipPoolService } from './sip-pool.service';
 import { TelnyxApiService } from './telnyx-api.service';
 import { TelnyxProvisioningService } from './telnyx-provisioning.service';
 import { TelnyxProvider } from './telnyx.provider';
 
 @Module({
   imports: [SettingsModule, TypeOrmModule.forFeature([CallLog, CallRequest, User])],
+  controllers: [NumbersController],
   providers: [
     ProvidersService,
     TelnyxProvider,
@@ -26,9 +30,12 @@ import { TelnyxProvider } from './telnyx.provider';
     AsteriskCdrService,
     TelnyxApiService,
     TelnyxProvisioningService,
+    RecordingsService,
+    SipPoolService,
   ],
   exports: [
     ProvidersService,
+    SipPoolService,
     TelnyxProvider,
     AsteriskProvider,
     TelnyxApiService,

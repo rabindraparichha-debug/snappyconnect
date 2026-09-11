@@ -62,12 +62,22 @@ export class TelnyxApiService {
 
   /** Credential connection dedicated to one user, so their number can ring them. */
   async createCredentialConnection(name: string): Promise<{ id: string }> {
+    // A connection without an outbound voice profile cannot place any PSTN
+    // call — Telnyx rejects everything instantly (CALL_REJECTED). Four
+    // recruiters were silently broken this way, so the profile is attached
+    // at birth, never assumed.
+    const profiles = await this.request<any>('/outbound_voice_profiles?page[size]=1');
+    const profileId = profiles?.data?.[0]?.id;
+
     const data = await this.request<any>('/credential_connections', {
       method: 'POST',
       body: {
         connection_name: name,
         user_name: `sc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
         password: this.randomSecret(),
+        ...(profileId
+          ? { outbound: { outbound_voice_profile_id: String(profileId) } }
+          : {}),
         // Browsers register over WSS; encrypted media keeps Chrome happy.
         webhook_event_url: undefined,
       },
@@ -104,19 +114,60 @@ export class TelnyxApiService {
     }));
   }
 
-  /** Buy the first available US local number in the given area code. */
-  async purchaseNumber(areaCode: string): Promise<string> {
+  /** Voice+SMS numbers for sale in an area code, cheapest first. */
+  async searchAvailable(
+    areaCode: string,
+    limit = 10,
+  ): Promise<Array<{ phoneNumber: string; upfrontCost: string; monthlyCost: string }>> {
     const search = await this.request<any>(
       `/available_phone_numbers?filter[country_code]=US&filter[national_destination_code]=${areaCode}` +
-        '&filter[features][]=sms&filter[features][]=voice&filter[limit]=1',
+        `&filter[features][]=sms&filter[features][]=voice&filter[limit]=${limit}`,
     );
-    const number = search?.data?.[0]?.phone_number;
-    if (!number) throw new BadRequestException(`No numbers available in area code ${areaCode}.`);
+    return (search?.data ?? []).map((n: any) => ({
+      phoneNumber: n.phone_number,
+      upfrontCost: n.cost_information?.upfront_cost ?? '—',
+      monthlyCost: n.cost_information?.monthly_cost ?? '—',
+    }));
+  }
+
+  /** Buy a specific number, or the first available one in the area code. */
+  async purchaseNumber(areaCode: string, phoneNumber?: string): Promise<string> {
+    let number = phoneNumber;
+    if (!number) {
+      const [first] = await this.searchAvailable(areaCode, 1);
+      if (!first) throw new BadRequestException(`No numbers available in area code ${areaCode}.`);
+      number = first.phoneNumber;
+    }
     await this.request('/number_orders', {
       method: 'POST',
       body: { phone_numbers: [{ phone_number: number }] },
     });
     return number;
+  }
+
+  /** Voice API (Call Control) applications — the board line's IVR runs on one. */
+  async listCallControlApps(): Promise<Array<{ id: string; name: string; webhookUrl: string }>> {
+    const data = await this.request<any>('/call_control_applications?page[size]=50');
+    return (data?.data ?? []).map((a: any) => ({
+      id: String(a.id),
+      name: a.application_name,
+      webhookUrl: a.webhook_event_url,
+    }));
+  }
+
+  async createCallControlApp(name: string, webhookUrl: string): Promise<{ id: string }> {
+    const data = await this.request<any>('/call_control_applications', {
+      method: 'POST',
+      body: {
+        application_name: name,
+        webhook_event_url: webhookUrl,
+        webhook_api_version: '2',
+        // The IVR answers explicitly on call.initiated.
+        first_command_timeout: 30,
+        first_command_timeout_secs: 30,
+      },
+    });
+    return { id: String(data?.data?.id) };
   }
 
   // ----- Call Control (board line IVR) -----
@@ -145,17 +196,70 @@ export class TelnyxApiService {
     });
   }
 
-  /** Bridge the caller to a SIP user (recruiter's browser) or a phone number. */
-  async transfer(callControlId: string, to: string, from?: string): Promise<void> {
+  /**
+   * Bridge the caller to a SIP user (recruiter's browser) or a phone number.
+   *
+   * `clientState` is echoed back on this leg's webhooks, which is how the voice
+   * controller recognises an unanswered transfer and falls through to voicemail.
+   */
+  async transfer(
+    callControlId: string,
+    to: string,
+    from?: string,
+    clientState?: string,
+    timeoutSecs = 30,
+  ): Promise<void> {
     await this.command(callControlId, 'transfer', {
       to,
       from,
-      timeout_secs: 30,
+      timeout_secs: timeoutSecs,
+      ...(clientState ? { client_state: Buffer.from(clientState).toString('base64') } : {}),
     });
   }
 
   async hangup(callControlId: string): Promise<void> {
     await this.command(callControlId, 'hangup', {});
+  }
+
+  /** Record a Call Control leg (board line); the file arrives by webhook. */
+  async startRecording(callControlId: string): Promise<void> {
+    await this.command(callControlId, 'record_start', {
+      format: 'mp3',
+      channels: 'single',
+    });
+  }
+
+  /**
+   * Speak a prompt, then record what the caller says until they hang up or go
+   * quiet — the voicemail primitive. The audio arrives as a
+   * `call.recording.saved` webhook like any other recording.
+   */
+  async recordVoicemail(callControlId: string, greeting: string): Promise<void> {
+    await this.speak(callControlId, greeting);
+    await this.command(callControlId, 'record_start', {
+      format: 'mp3',
+      channels: 'single',
+      play_beep: true,
+      max_length: 180,
+      timeout_secs: 5,
+    });
+  }
+
+  /**
+   * Recording for the WebRTC dialer is a property of the outbound voice
+   * profile — every call placed through it is captured, and Telnyx posts a
+   * call.recording.saved webhook when the audio is ready.
+   */
+  async setOutboundRecording(profileId: string, enabled: boolean): Promise<void> {
+    await this.request(`/outbound_voice_profiles/${profileId}`, {
+      method: 'PATCH',
+      body: { call_recording: { call_recording_type: enabled ? 'all' : 'none' } },
+    });
+  }
+
+  async listOutboundVoiceProfiles(): Promise<Array<{ id: string; name: string }>> {
+    const data = await this.request<any>('/outbound_voice_profiles?page[size]=50');
+    return (data?.data ?? []).map((p: any) => ({ id: String(p.id), name: p.name }));
   }
 
   private async command(callControlId: string, action: string, body: Record<string, unknown>) {

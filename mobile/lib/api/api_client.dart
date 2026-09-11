@@ -23,8 +23,9 @@ class ApiClient {
 
   static final ApiClient instance = ApiClient._();
 
-  /// 10.0.2.2 reaches the host machine from the Android emulator.
-  static const defaultBaseUrl = 'http://10.0.2.2:4000/api/v1';
+  /// Production API. (For the Android emulator against a local backend,
+  /// change it to http://10.0.2.2:4000/api/v1 on the login screen.)
+  static const defaultBaseUrl = 'https://call.snappyhires.com/api/v1';
 
   String baseUrl = defaultBaseUrl;
   String? _token;
@@ -46,8 +47,24 @@ class ApiClient {
     }
   }
 
+  /// Recruiters only need to type the domain: "call.snappyhires.com" becomes
+  /// "https://call.snappyhires.com/api/v1". A full URL passes through, and an
+  /// explicit http:// (local dev, emulator) is respected.
+  static String normalizeServerUrl(String input) {
+    var url = input.trim().replaceAll(RegExp(r'/+$'), '');
+    if (url.isEmpty) return defaultBaseUrl;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://$url';
+    }
+    final uri = Uri.parse(url);
+    if (!uri.path.contains('/api')) {
+      url = '$url/api/v1';
+    }
+    return url;
+  }
+
   Future<void> login(String serverUrl, String email, String password) async {
-    baseUrl = serverUrl.replaceAll(RegExp(r'/+$'), '');
+    baseUrl = normalizeServerUrl(serverUrl);
     final data = await post('/auth/login', body: {'email': email, 'password': password})
         as Map<String, dynamic>;
     _token = data['accessToken'] as String;

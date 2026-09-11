@@ -36,6 +36,8 @@ export class AnalyticsService {
       monthCalls,
       outboundCalls,
       inboundCalls,
+      aiCalls,
+      aiVoicemails,
     ] = await Promise.all([
       this.count(qb),
       this.count(qb, 'call.status IN (:...connected)', { connected: CONNECTED }),
@@ -50,6 +52,8 @@ export class AnalyticsService {
       this.countPeriod(qb, "date_trunc('month', CURRENT_DATE)"),
       this.count(qb, 'call.direction = :outDir', { outDir: CallDirection.OUTBOUND }),
       this.count(qb, 'call.direction = :inDir', { inDir: CallDirection.INBOUND }),
+      this.count(qb, `call.metadata ->> 'ai' = 'true'`),
+      this.count(qb, `call.metadata ->> 'outcome' = 'VOICEMAIL'`),
     ]);
 
     const avgDuration = connectedCalls > 0 ? Math.round(durationAgg.totalDuration / connectedCalls) : 0;
@@ -68,6 +72,9 @@ export class AnalyticsService {
       rejectedCalls,
       outboundCalls,
       inboundCalls,
+      aiCalls,
+      recruiterCalls: totalCalls - aiCalls,
+      aiVoicemails,
       connectionRate,
       averageDurationSeconds: avgDuration,
       totalTalkTimeSeconds: durationAgg.totalDuration,
@@ -119,6 +126,9 @@ export class AnalyticsService {
       regionBreakdown,
       statusBreakdown,
       directionBreakdown,
+      aiCalls,
+      aiVoicemails,
+      aiRecruiters,
     ] = await Promise.all([
       this.count(qb),
       this.count(qb, 'call.status IN (:...connected)', { connected: CONNECTED }),
@@ -127,6 +137,9 @@ export class AnalyticsService {
       this.groupByField(qb, 'call.region'),
       this.groupByField(qb, 'call.status'),
       this.groupByField(qb, 'call.direction'),
+      this.count(qb, `call.metadata ->> 'ai' = 'true'`),
+      this.count(qb, `call.metadata ->> 'outcome' = 'VOICEMAIL'`),
+      this.countDistinct(qb.clone().andWhere(`call.metadata ->> 'ai' = 'true'`), 'call."userId"'),
     ]);
 
     const connectionRate = totalCalls > 0 ? +(connectedCalls / totalCalls * 100).toFixed(1) : 0;
@@ -136,6 +149,10 @@ export class AnalyticsService {
       totalCalls,
       connectedCalls,
       connectionRate,
+      aiCalls,
+      recruiterCalls: totalCalls - aiCalls,
+      aiRecruiters,
+      aiVoicemails,
       averageDurationSeconds: avgDuration,
       totalTalkTimeSeconds: durationAgg.totalDuration,
       byRecruiter: recruiterBreakdown,
@@ -143,6 +160,27 @@ export class AnalyticsService {
       byStatus: statusBreakdown,
       byDirection: directionBreakdown,
     };
+  }
+
+  /** Calls that reached voicemail (AI-classified), newest first. */
+  async voicemailReport(user: User, query: AnalyticsQueryDto, limit = 50) {
+    const qb = this.baseQuery(query)
+      .leftJoinAndSelect('call.user', 'user')
+      .andWhere(`call.metadata ->> 'outcome' = 'VOICEMAIL'`)
+      .orderBy('call.createdAt', 'DESC')
+      .take(Math.min(limit, 200));
+    if (user.role !== Role.ADMIN) {
+      qb.andWhere('call.userId = :uid', { uid: user.id });
+    }
+    const rows = await qb.getMany();
+    return rows.map((c) => ({
+      id: c.id,
+      phoneNumber: c.phoneNumber,
+      contactName: c.contactName,
+      recruiter: c.user?.name ?? '—',
+      at: c.createdAt,
+      durationSeconds: c.durationSeconds,
+    }));
   }
 
   async leaderboard(query: AnalyticsQueryDto, metric: 'calls' | 'connected' | 'talkTime' = 'calls', limit = 10) {
@@ -169,6 +207,9 @@ export class AnalyticsService {
       .addSelect(`COUNT(*) FILTER (WHERE call.status IN ('answered','completed'))`, 'connected')
       .addSelect('COALESCE(SUM(call."durationSeconds"), 0)', 'talkTime')
       .addSelect(`COUNT(DISTINCT call."phoneNumber")`, 'uniqueContacts')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true')`, 'aiCalls')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true' AND call.metadata ->> 'outcome' = 'VOICEMAIL')`, 'aiVoicemails')
+      .addSelect(`COUNT(*) FILTER (WHERE call.metadata ->> 'ai' = 'true' AND call.status IN ('answered','completed') AND COALESCE(call.metadata ->> 'outcome', '') != 'VOICEMAIL')`, 'aiAnswered')
       .innerJoin('call.user', 'user')
       .groupBy('call.userId')
       .addGroupBy('user.name')
@@ -183,9 +224,14 @@ export class AnalyticsService {
       name: r.name,
       email: r.email,
       totalCalls: Number(r.total),
+      humanCalls: Number(r.total) - Number(r.aiCalls),
       connectedCalls: Number(r.connected),
       talkTimeSeconds: Number(r.talkTime),
       uniqueContacts: Number(r.uniqueContacts),
+      aiCalls: Number(r.aiCalls),
+      aiAnswered: Number(r.aiAnswered),
+      aiVoicemails: Number(r.aiVoicemails),
+      aiNotAnswered: Number(r.aiCalls) - Number(r.aiAnswered) - Number(r.aiVoicemails),
       connectionRate: Number(r.total) > 0 ? +(Number(r.connected) / Number(r.total) * 100).toFixed(1) : 0,
     }));
   }

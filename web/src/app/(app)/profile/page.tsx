@@ -16,15 +16,42 @@ export default function ProfilePage() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [vmGreeting, setVmGreeting] = useState('');
+  const [vmRing, setVmRing] = useState(25);
+  const [vmMessage, setVmMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [vmSaving, setVmSaving] = useState(false);
+
   useEffect(() => {
     api<User>('/auth/me')
       .then((me) => {
         setUser(me);
+        setVmGreeting(me.providerConfig?.voicemailGreeting ?? '');
+        setVmRing(Number(me.providerConfig?.ringSeconds) || 25);
         const token = getToken();
         if (token) setSession(token, me); // refresh cached profile
       })
       .finally(() => setLoading(false));
   }, []);
+
+  async function saveVoicemail(e: FormEvent) {
+    e.preventDefault();
+    setVmMessage(null);
+    setVmSaving(true);
+    try {
+      const updated = await api<User>('/profile/voicemail', {
+        method: 'PATCH',
+        body: { voicemailGreeting: vmGreeting, ringSeconds: vmRing },
+      });
+      setUser(updated);
+      const token = getToken();
+      if (token) setSession(token, updated);
+      setVmMessage({ ok: true, text: 'Voicemail settings saved.' });
+    } catch (err) {
+      setVmMessage({ ok: false, text: err instanceof Error ? err.message : 'Save failed' });
+    } finally {
+      setVmSaving(false);
+    }
+  }
 
   async function changePassword(e: FormEvent) {
     e.preventDefault();
@@ -90,6 +117,95 @@ export default function ProfilePage() {
           )}
         </dl>
       </Card>
+
+      <Card className="mt-6 p-6">
+        <h2 className="text-base font-semibold text-slate-900">My Numbers &amp; Lines</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          What candidates see when you call, and how calls reach you.
+        </p>
+        <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {user.regions?.includes('usa') && (
+            <>
+              <ProfileField
+                label="USA Direct Line"
+                value={
+                  user.providerConfig?.telnyxNumber ??
+                  'Shared company number (ask an admin for a personal line)'
+                }
+              />
+              <ProfileField
+                label="Board-Line Extension"
+                value={
+                  user.providerConfig?.ivrDigit
+                    ? `Callers press ${user.providerConfig.ivrDigit} to reach you`
+                    : '—'
+                }
+              />
+            </>
+          )}
+          {user.regions?.includes('uae') && (
+            <ProfileField
+              label="UAE Extension"
+              value={user.providerConfig?.sipUsername ?? 'Not assigned — contact an admin'}
+            />
+          )}
+          {user.regions?.includes('india') && (
+            <ProfileField label="India" value="Calls use your own phone (native dialer)" />
+          )}
+          {!user.regions?.length && (
+            <ProfileField label="Calling Access" value="No regions assigned yet" />
+          )}
+        </dl>
+      </Card>
+
+      {user.regions?.includes('usa') && (
+        <Card className="mt-6 p-6">
+          <h2 className="text-base font-semibold text-slate-900">My Voicemail</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            What callers hear when you can&apos;t answer, and how long your line rings first.
+          </p>
+          <form onSubmit={saveVoicemail} className="mt-4 space-y-4">
+            <div>
+              <Label>Voicemail greeting</Label>
+              <textarea
+                value={vmGreeting}
+                onChange={(e) => setVmGreeting(e.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Hi, you've reached [your name] at SnappyHires. Please leave a message and I'll call you back."
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-600"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Read aloud to callers by text-to-speech. Leave blank for the standard greeting.
+              </p>
+            </div>
+            <div className="flex items-end gap-3">
+              <div>
+                <Label>Ring for</Label>
+                <select
+                  value={vmRing}
+                  onChange={(e) => setVmRing(Number(e.target.value))}
+                  className="mt-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-600"
+                >
+                  {[15, 20, 25, 30, 40, 50, 60].map((s) => (
+                    <option key={s} value={s}>
+                      {s} seconds
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button type="submit" disabled={vmSaving}>
+                {vmSaving ? 'Saving…' : 'Save voicemail'}
+              </Button>
+              {vmMessage && (
+                <p className={`text-sm ${vmMessage.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {vmMessage.text}
+                </p>
+              )}
+            </div>
+          </form>
+        </Card>
+      )}
 
       <Card className="mt-6 p-6">
         <h2 className="text-base font-semibold text-slate-900">Change Password</h2>
