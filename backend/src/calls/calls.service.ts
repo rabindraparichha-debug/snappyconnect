@@ -436,10 +436,12 @@ export class CallsService {
       );
     }
 
-    const countQb = qb.clone();
+    // getQueryAndParameters() emits $n placeholders with a matching positional
+    // array; getQuery() leaves TypeORM's named :params, which raw query() can't bind.
+    const [innerSql, innerParams] = qb.clone().getQueryAndParameters();
     const totalResult = await this.callLogsRepo.query(
-      `SELECT COUNT(*) as count FROM (${countQb.getQuery()}) sub`,
-      countQb.getParameters() ? Object.values(countQb.getParameters()) : [],
+      `SELECT COUNT(*) as count FROM (${innerSql}) sub`,
+      innerParams,
     );
     const total = parseInt(totalResult?.[0]?.count ?? '0', 10);
 
