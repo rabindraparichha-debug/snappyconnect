@@ -115,6 +115,7 @@ EOF
 echo "--- nightly database backup"
 install -m 755 "$APP_DIR/backup.sh" /usr/local/bin/snappyconnect-backup
 install -m 755 "$APP_DIR/restore.sh" /usr/local/bin/snappyconnect-restore
+install -m 755 "$APP_DIR/backup-check.sh" /usr/local/bin/snappyconnect-backup-check
 
 cat > /etc/systemd/system/snappyconnect-backup.service << 'EOF'
 [Unit]
@@ -139,9 +140,32 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# Checks the outcome, not the process: emails if the storage box has no dump
+# newer than 30h, which also catches a timer that silently stopped running.
+cat > /etc/systemd/system/snappyconnect-backup-check.service << 'EOF'
+[Unit]
+Description=SnappyConnect backup staleness check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/snappyconnect-backup-check
+EOF
+
+cat > /etc/systemd/system/snappyconnect-backup-check.timer << 'EOF'
+[Unit]
+Description=Daily check that the SnappyConnect backup reached the storage box
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable snappyconnect-api snappyconnect-web
-systemctl enable --now snappyconnect-backup.timer
+systemctl enable --now snappyconnect-backup.timer snappyconnect-backup-check.timer
 systemctl restart snappyconnect-api snappyconnect-web
 
 echo "--- firewall (only touched if ufw is active; CloudPanel rules untouched)"

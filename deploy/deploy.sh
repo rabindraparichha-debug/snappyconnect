@@ -40,6 +40,7 @@ rsync -az --delete -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking
 echo "==> 2/4 Uploading setup and maintenance scripts"
 rsync -az -e "ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
   "$REPO_ROOT/deploy/vps-setup.sh" "$REPO_ROOT/deploy/backup.sh" "$REPO_ROOT/deploy/restore.sh" \
+  "$REPO_ROOT/deploy/backup-check.sh" \
   root@$VPS_IP:/opt/snappyconnect/
 
 echo "==> 3/4 Running server setup (install deps, build, restart services)"
