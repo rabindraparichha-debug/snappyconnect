@@ -27,7 +27,8 @@ const APPS: AppEntry[] = [
   {
     icon: '🤖',
     title: 'Android',
-    blurb: 'Installed directly from this page (not the Play Store), so Android asks one extra permission.',
+    blurb:
+      'Installed directly from this page (not the Play Store), so Android asks one extra permission. After that, the app updates itself — it offers new versions with one tap.',
     steps: [
       'Tap the button below to download the APK.',
       'Open the downloaded file. If Android warns about unknown apps, choose “Allow from this source” — the file comes only from this official page.',
@@ -103,9 +104,9 @@ export default function DownloadsPage() {
       </div>
 
       <p className="mt-6 text-xs text-slate-400">
-        Reinstalling after an update? Android: uninstall the old app first if the installer
-        complains. Extension: download the new ZIP, then use the reload icon on
-        chrome://extensions. Sharing with someone who isn&apos;t signed in? Send them{' '}
+        Updates: Android and iPhone apps update themselves — the app prompts you when a new
+        version is out, nothing to re-download here. Extension: download the new ZIP, then use
+        the reload icon on chrome://extensions. Sharing with someone who isn&apos;t signed in? Send them{' '}
         <a href="https://call.snappyhires.com/downloads/" className="underline">
           call.snappyhires.com/downloads
         </a>
