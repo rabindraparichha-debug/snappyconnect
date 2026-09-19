@@ -14,11 +14,12 @@ import { User } from '../users/user.entity';
 import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
 import { RecordingsService } from './recordings.service';
+import { VoicemailsModule } from '../voicemails/voicemails.module';
 import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
 
 @Module({
-  imports: [
+  imports: [VoicemailsModule, 
     TypeOrmModule.forFeature([CallLog, CallRequest, User]),
     ProvidersModule,
     SettingsModule,

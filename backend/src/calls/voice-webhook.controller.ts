@@ -7,6 +7,7 @@ import { DEFAULT_GREETING } from '../providers/numbers.controller';
 import { TelnyxApiService } from '../providers/telnyx-api.service';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
+import { VoicemailsService } from '../voicemails/voicemails.service';
 
 /**
  * Call Control webhook for the shared board line: answers, reads a menu, and
@@ -50,13 +51,16 @@ export class VoiceWebhookController {
 
   /** Legs that reached a recruiter, and legs already taking a message. */
   private readonly bridged = new Set<string>();
-  private readonly voicemailed = new Set<string>();
+  /** Leg → the recruiter whose mailbox is recording, so the finished
+   * recording can be filed against the right person. */
+  private readonly voicemailed = new Map<string, { userId: string; at: number }>();
 
   constructor(
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    private readonly voicemails: VoicemailsService,
   ) {}
 
   @Public()
@@ -67,6 +71,12 @@ export class VoiceWebhookController {
     const payload = event?.data?.payload;
     const callControlId: string | undefined = payload?.call_control_id;
     if (!type || !callControlId) return { received: true };
+
+    // Legs whose recording never arrived would otherwise sit here forever.
+    const staleBefore = Date.now() - 30 * 60 * 1000;
+    for (const [leg, entry] of this.voicemailed) {
+      if (entry.at < staleBefore) this.voicemailed.delete(leg);
+    }
 
     // Only inbound legs run the menu; our own transfer legs must pass through.
     const isInbound = payload?.direction === 'incoming';
@@ -97,7 +107,35 @@ export class VoiceWebhookController {
             }
           }
           this.bridged.delete(callControlId);
-          this.voicemailed.delete(callControlId);
+          // The mapping is deliberately kept: call.recording.saved arrives
+          // after the caller hangs up, and dropping it here would leave the
+          // message with no owner. It is removed when the recording lands.
+          break;
+        }
+
+        // The message is finished and Telnyx has the audio: file it against
+        // the recruiter whose mailbox took it, then forget the leg.
+        case 'call.recording.saved': {
+          const ownerId = this.voicemailed.get(callControlId)?.userId;
+          if (ownerId) {
+            const url: string | undefined =
+              payload?.recording_urls?.mp3 ?? payload?.public_recording_urls?.mp3;
+            if (url) {
+              await this.voicemails.record({
+                userId: ownerId,
+                fromNumber: payload?.from ?? 'Unknown',
+                sourceUrl: url,
+                durationSeconds: Math.round(
+                  (payload?.recording_ended_at && payload?.recording_started_at
+                    ? (new Date(payload.recording_ended_at).getTime() -
+                        new Date(payload.recording_started_at).getTime()) / 1000
+                    : 0) || 0,
+                ),
+                externalId: payload?.recording_id ?? callControlId,
+              });
+            }
+            this.voicemailed.delete(callControlId);
+          }
           break;
         }
 
@@ -218,7 +256,7 @@ export class VoiceWebhookController {
     const greeting =
       user.providerConfig?.voicemailGreeting?.trim() ||
       `You have reached ${user.name}. Please leave a message after the tone.`;
-    this.voicemailed.add(callControlId);
+    this.voicemailed.set(callControlId, { userId: user.id, at: Date.now() });
     await this.telnyx.recordVoicemail(callControlId, greeting);
   }
 

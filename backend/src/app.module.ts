@@ -17,6 +17,7 @@ import { ProvidersModule } from './providers/providers.module';
 import { SeedModule } from './seed/seed.module';
 import { SettingsModule } from './settings/settings.module';
 import { SmsModule } from './sms/sms.module';
+import { VoicemailsModule } from './voicemails/voicemails.module';
 import { ActivityModule } from './activity/activity.module';
 import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
 import { ScriptsModule } from './scripts/scripts.module';
@@ -54,6 +55,7 @@ import { UsersModule } from './users/users.module';
     ProvidersModule,
     CallsModule,
     SmsModule,
+    VoicemailsModule,
     DashboardModule,
     NotificationsModule,
     ActivityModule,

@@ -17,6 +17,7 @@ const NAV = [
   { href: '/lists', label: 'Contact Lists', icon: ListIcon, adminOnly: false },
   { href: '/schedule', label: 'Schedule', icon: CalendarIcon, adminOnly: false },
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
+  { href: '/voicemail', label: 'Voicemail', icon: VoicemailIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
   { href: '/ai-calls', label: 'AI Calls', icon: BotIcon, adminOnly: false },
   { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },
@@ -293,6 +294,16 @@ function PhoneIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function VoicemailIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+      <circle cx="6" cy="14" r="4" />
+      <circle cx="18" cy="14" r="4" />
+      <line x1="6" y1="18" x2="18" y2="18" />
+    </svg>
+  );
+}
+
 function MicIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
