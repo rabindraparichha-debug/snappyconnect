@@ -400,6 +400,47 @@ export class AiCallsService {
     return res.json();
   }
 
+  /**
+   * An accent variant of a cloned voice: same person's timbre, different
+   * English dialect. Cheaper and faster than recording the voice again.
+   */
+  async localizeVoice(
+    voiceId: string,
+    name: string,
+    dialect: string,
+    gender: string,
+  ): Promise<{ voice_id: string; name: string; dialect: string }> {
+    const form = new URLSearchParams({
+      voice_id: voiceId,
+      name,
+      dialect,
+      gender,
+    });
+    const res = await this.platformFetch('POST', '/v1/voices/localize', form, {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new ServiceUnavailableException(
+        `Could not create the accent variant (${res.status}): ${detail.slice(0, 200)}`,
+      );
+    }
+    return res.json();
+  }
+
+  /** Speak a line in a voice so it can be judged before being assigned. */
+  async previewVoice(voiceId: string, text?: string): Promise<Buffer> {
+    const form = new URLSearchParams({ voice_id: voiceId });
+    if (text) form.set('text', text);
+    const res = await this.platformFetch('POST', '/v1/voices/preview', form, {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    });
+    if (!res.ok) {
+      throw new ServiceUnavailableException(`Could not preview that voice (${res.status}).`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+
   private async findByPlatformId(platformCallId: string): Promise<CallLog | null> {
     return this.callLogsRepo
       .createQueryBuilder('log')

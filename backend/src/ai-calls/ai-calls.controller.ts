@@ -9,11 +9,12 @@ import {
   Post,
   RawBodyRequest,
   Req,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -102,6 +103,37 @@ export class AiCallsController {
     if (!name) throw new BadRequestException('A name for the voice is required.');
     const provider = body?.provider === 'elevenlabs' ? 'elevenlabs' : 'cartesia';
     return this.aiCalls.cloneVoice(name, file, provider);
+  }
+
+  /** Accent variant of a cloned voice: us, uk, au or in. */
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @Post('voices/:voiceId/accent')
+  accent(
+    @Param('voiceId') voiceId: string,
+    @Body() body: { name?: string; dialect?: string; gender?: string },
+  ) {
+    const dialect = (body?.dialect ?? '').toLowerCase();
+    if (!['us', 'uk', 'au', 'in'].includes(dialect)) {
+      throw new BadRequestException('dialect must be one of us, uk, au, in');
+    }
+    const gender = body?.gender === 'male' ? 'male' : 'female';
+    const name = (body?.name ?? '').trim();
+    if (!name) throw new BadRequestException('A name for the variant is required.');
+    return this.aiCalls.localizeVoice(voiceId, name, dialect, gender);
+  }
+
+  /** Hear a voice before assigning it. Returns mp3 audio. */
+  @ApiBearerAuth()
+  @Post('voices/:voiceId/preview')
+  async preview(
+    @Param('voiceId') voiceId: string,
+    @Body() body: { text?: string },
+    @Res() res: Response,
+  ) {
+    const audio = await this.aiCalls.previewVoice(voiceId, body?.text);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.send(audio);
   }
 
   /** Voice-platform callback: events and final results, HMAC-signed. */
