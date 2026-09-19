@@ -1,6 +1,17 @@
 export enum Role {
+  /** Platform operator. Spans every tenant; the only role that may manage tenants. */
+  SUPER_ADMIN = 'super_admin',
+  /** Administrator of a single tenant. */
   ADMIN = 'admin',
   USER = 'user',
+}
+
+export enum TenantStatus {
+  ACTIVE = 'active',
+  /** Billing lapsed or manually paused: users can sign in but cannot place calls. */
+  SUSPENDED = 'suspended',
+  /** Retained for history and billing reconciliation; no sign-in. */
+  CANCELED = 'canceled',
 }
 
 export enum CallingProvider {

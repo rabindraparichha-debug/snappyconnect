@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
 import { toUsE164 } from '../common/phone.util';
@@ -16,13 +15,14 @@ import { DncService } from '../dnc/dnc.service';
 import { SettingsService } from '../settings/settings.service';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { SmsLog } from './sms-log.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
 
   constructor(
-    @InjectRepository(SmsLog)
+    @InjectTenantRepository(SmsLog)
     private readonly smsRepo: Repository<SmsLog>,
     private readonly telnyxProvider: TelnyxProvider,
     private readonly notificationsService: NotificationsService,
@@ -47,7 +47,7 @@ export class SmsService {
 
     // A prior STOP is binding — TCPA and the 10DLC campaign terms both
     // require it to be honored permanently, not per-thread.
-    if (this.dncService.isBlocked(to)) {
+    if (await this.dncService.isBlocked(to)) {
       throw new BadRequestException(
         `${to} has opted out of messages (STOP) or is on the Do Not Call list.`,
       );
@@ -318,7 +318,7 @@ export class SmsService {
     const mine = rows.find((r) => r.userId === user.id);
     return {
       phoneNumber: phone,
-      optedOut: this.dncService.isBlocked(phone),
+      optedOut: await this.dncService.isBlocked(phone),
       you: mine ? activity(mine) : null,
       others: rows
         .filter((r) => r.userId !== user.id)

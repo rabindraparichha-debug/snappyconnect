@@ -29,6 +29,11 @@ export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   @Index()
   @Column({ type: 'uuid', nullable: true })
   actorId: string | null;

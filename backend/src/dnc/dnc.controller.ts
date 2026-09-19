@@ -38,8 +38,8 @@ export class DncController {
    * WebRTC and so never reaches the server-side guard in `initiate`.
    */
   @Get('check')
-  check(@Query('phoneNumber') phoneNumber: string) {
-    return { blocked: this.service.isBlocked(phoneNumber ?? '') };
+  async check(@Query('phoneNumber') phoneNumber: string) {
+    return { blocked: await this.service.isBlocked(phoneNumber ?? '') };
   }
 
   /** Any recruiter can suppress a number they were asked to stop calling. */

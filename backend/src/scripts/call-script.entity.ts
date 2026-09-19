@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -11,6 +12,11 @@ import { Region } from '../common/enums';
 export class CallScript {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
 
   @Column({ type: 'varchar', length: 120 })
   title: string;

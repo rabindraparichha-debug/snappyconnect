@@ -2,19 +2,41 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { CallingProvider, Region, Role, UserStatus } from '../common/enums';
+import { Tenant } from '../tenants/tenant.entity';
 
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /**
+   * Owning tenant. A super-admin also belongs to one (the platform's own
+   * tenant) so that every row has an owner; their role, not a null here, is
+   * what lets them act across tenants.
+   */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
+  @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenantId' })
+  tenant?: Tenant;
+
   @Column()
   name: string;
 
+  /**
+   * Globally unique, not per-tenant: sign-in takes only an email and password,
+   * so a repeated address would make the tenant ambiguous at login. One person
+   * working for two tenants needs two addresses.
+   */
   @Column({ unique: true })
   email: string;
 

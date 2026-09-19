@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { Role } from '../common/enums';
 import { User } from '../users/user.entity';
 import { Notification, NotificationType } from './notification.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class NotificationsService {
   constructor(
-    @InjectRepository(Notification)
+    @InjectTenantRepository(Notification)
     private readonly repo: Repository<Notification>,
   ) {}
 

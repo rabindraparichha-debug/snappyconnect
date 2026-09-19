@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums';
@@ -19,6 +18,7 @@ import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
 import { AsteriskAmiService } from './asterisk-ami.service';
 import { TelnyxApiService } from './telnyx-api.service';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 /** {options} is replaced with the live extension list when the call comes in. */
 export const DEFAULT_GREETING =
@@ -158,7 +158,7 @@ export class NumbersController {
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
     private readonly ami: AsteriskAmiService,
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
   ) {}
 

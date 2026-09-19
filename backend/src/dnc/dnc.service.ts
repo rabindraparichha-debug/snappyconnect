@@ -1,36 +1,59 @@
-import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { toE164 } from '../contact-lists/csv.util';
+import { TenantContext } from '../common/tenant-context';
 import { User } from '../users/user.entity';
 import { DncEntry } from './dnc-entry.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 /**
  * Suppression list. Blocked numbers are held in memory as well as in the
  * database so a dial-time check — and bulk import screening — never costs a
- * query per number. The cache is refreshed on every write.
+ * query per number.
+ *
+ * The cache is keyed by tenant. A single shared set would apply one customer's
+ * suppression list to every other customer, and let them infer its contents by
+ * watching which numbers came back blocked.
  *
  * Everything is compared in E.164. A STOP arrives as "+16305551234"; with
  * punctuation-only matching, a recruiter typing "630-555-1234" slipped past
  * the block and could text someone who had opted out.
  */
 @Injectable()
-export class DncService implements OnModuleInit {
-  private blocked = new Set<string>();
+export class DncService {
+  private readonly blockedByTenant = new Map<string, Set<string>>();
 
   constructor(
-    @InjectRepository(DncEntry)
+    @InjectTenantRepository(DncEntry)
     private readonly repo: Repository<DncEntry>,
+    private readonly tenantContext: TenantContext,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.refresh().catch(() => undefined);
+  /**
+   * The calling tenant's blocked numbers, loaded on first use and kept until a
+   * write invalidates it. Loaded lazily rather than at boot because there is no
+   * tenant in scope during startup.
+   */
+  async blockedSet(): Promise<Set<string>> {
+    const tenantId = this.tenantContext.requireTenantId();
+    const cached = this.blockedByTenant.get(tenantId);
+    if (cached) return cached;
+
+    const all = await this.repo.find({ select: { phoneNumber: true } });
+    // Normalized on load too, so entries saved in older formats still match.
+    const set = new Set(all.map((e) => toE164(e.phoneNumber)));
+    this.blockedByTenant.set(tenantId, set);
+    return set;
+  }
+
+  async isBlocked(phoneNumber: string): Promise<boolean> {
+    return (await this.blockedSet()).has(toE164(phoneNumber));
   }
 
   async findAll(q?: string): Promise<DncEntry[]> {
     const qb = this.repo.createQueryBuilder('d').orderBy('d.createdAt', 'DESC').take(500);
     if (q?.trim()) {
-      qb.where('d.phoneNumber ILIKE :q', { q: `%${q.trim()}%` });
+      qb.andWhere('d.phoneNumber ILIKE :q', { q: `%${q.trim()}%` });
     }
     return qb.getMany();
   }
@@ -49,7 +72,7 @@ export class DncService implements OnModuleInit {
         addedById: user.id,
       }),
     );
-    this.blocked.add(normalized);
+    (await this.blockedSet()).add(normalized);
     return entry;
   }
 
@@ -62,16 +85,12 @@ export class DncService implements OnModuleInit {
   async remove(id: string): Promise<void> {
     const entry = await this.findOne(id);
     await this.repo.remove(entry);
-    this.blocked.delete(toE164(entry.phoneNumber));
+    (await this.blockedSet()).delete(toE164(entry.phoneNumber));
   }
 
-  isBlocked(phoneNumber: string): boolean {
-    return this.blocked.has(toE164(phoneNumber));
-  }
-
+  /** Drop the calling tenant's cache so the next check re-reads the table. */
   async refresh(): Promise<void> {
-    const all = await this.repo.find({ select: { phoneNumber: true } });
-    // Normalized on load too, so entries saved in older formats still match.
-    this.blocked = new Set(all.map((e) => toE164(e.phoneNumber)));
+    this.blockedByTenant.delete(this.tenantContext.requireTenantId());
+    await this.blockedSet();
   }
 }

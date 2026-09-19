@@ -19,6 +19,11 @@ export class SmsBatch {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   @Column({ type: 'uuid' })
   @Index()
   userId: string;
@@ -55,6 +60,14 @@ export class SmsBatch {
 export class SmsBatchItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /**
+   * Owning tenant. Denormalised from the parent batch so an item can be scoped
+   * directly, without a join the scoped repository would have to know about.
+   */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
 
   @Column({ type: 'uuid' })
   @Index()

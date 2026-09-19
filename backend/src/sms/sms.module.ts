@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantOrmModule } from '../common/tenant-orm.module';
 import { ActivityModule } from '../activity/activity.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -15,7 +16,16 @@ import { DncModule } from '../dnc/dnc.module';
 import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SmsLog, SmsBatch, SmsBatchItem, User]), ProvidersModule, NotificationsModule, ActivityModule, WebhooksModule, DncModule, SettingsModule],
+  imports: [
+    TypeOrmModule.forFeature([SmsLog, SmsBatch, SmsBatchItem, User]),
+    TenantOrmModule.forFeature([SmsLog, SmsBatch, SmsBatchItem, User]),
+    ProvidersModule,
+    NotificationsModule,
+    ActivityModule,
+    WebhooksModule,
+    DncModule,
+    SettingsModule,
+  ],
   controllers: [SmsBatchesController, SmsController],
   providers: [SmsService, SmsBatchesService],
   exports: [SmsService],

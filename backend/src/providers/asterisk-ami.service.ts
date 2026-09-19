@@ -144,7 +144,9 @@ export class AsteriskAmiService implements OnModuleDestroy {
     // Settings (admin UI) win; otherwise fall back to the server environment,
     // which the deploy script fills in — Asterisk runs on this same host, so
     // the credentials never need to travel or be pasted anywhere.
-    const cfg = await this.settings.getProviderSettings('asterisk');
+    // Platform-level: the UAE Asterisk box is one shared machine, and this
+    // connects at boot with no tenant in scope.
+    const cfg = await this.settings.getPlatformProviderSettings('asterisk');
     const host: string = cfg.amiHost || process.env.ASTERISK_AMI_HOST || '127.0.0.1';
     const port = Number(cfg.amiPort || process.env.ASTERISK_AMI_PORT || 5038);
     const username: string | undefined = cfg.amiUsername || process.env.ASTERISK_AMI_USERNAME;

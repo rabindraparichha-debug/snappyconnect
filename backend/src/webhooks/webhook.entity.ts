@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -16,6 +17,11 @@ export enum WebhookEvent {
 export class Webhook {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
 
   @Column({ type: 'varchar', length: 120 })
   name: string;

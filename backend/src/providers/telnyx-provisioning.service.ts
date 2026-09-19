@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { SettingsService } from '../settings/settings.service';
 import { TelnyxApiService } from './telnyx-api.service';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 export interface DirectLine {
   phoneNumber: string;
@@ -24,7 +24,7 @@ export class TelnyxProvisioningService {
   constructor(
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
   ) {}
 

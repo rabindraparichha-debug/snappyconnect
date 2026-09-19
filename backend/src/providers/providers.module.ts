@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantOrmModule } from '../common/tenant-orm.module';
 import { CallLog } from '../calls/call-log.entity';
 import { CallRequest } from '../calls/call-request.entity';
 import { User } from '../users/user.entity';
@@ -18,7 +19,7 @@ import { TelnyxProvisioningService } from './telnyx-provisioning.service';
 import { TelnyxProvider } from './telnyx.provider';
 
 @Module({
-  imports: [SettingsModule, TypeOrmModule.forFeature([CallLog, CallRequest, User])],
+  imports: [SettingsModule, TypeOrmModule.forFeature([CallLog, CallRequest, User]), TenantOrmModule.forFeature([CallLog, CallRequest, User])],
   controllers: [NumbersController],
   providers: [
     ProvidersService,

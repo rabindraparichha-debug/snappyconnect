@@ -14,6 +14,7 @@ import { DncService } from '../dnc/dnc.service';
 import { User } from '../users/user.entity';
 import { ContactItemStatus } from './contact-list.entity';
 import { ContactListsService } from './contact-lists.service';
+import { toE164 } from './csv.util';
 import {
   CreateContactListDto,
   ImportCsvDto,
@@ -70,8 +71,11 @@ export class ContactListsController {
   }
 
   @Post(':id/import')
-  import(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: ImportCsvDto) {
-    return this.service.importCsv(user, id, dto, (phone) => this.dnc.isBlocked(phone));
+  async import(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: ImportCsvDto) {
+    // Load this tenant's suppression list once, then screen each row against it
+    // in memory — the import loop must not cost a query per number.
+    const blocked = await this.dnc.blockedSet();
+    return this.service.importCsv(user, id, dto, (phone) => blocked.has(toE164(phone)));
   }
 
   @Post(':id/reset')

@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { UserStatus } from '../common/enums';
+import { Role, TenantStatus, UserStatus } from '../common/enums';
 import { MailerService } from '../common/mailer.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 
@@ -11,6 +12,7 @@ import { UsersService } from '../users/users.service';
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
+    private readonly tenantsService: TenantsService,
     private readonly jwtService: JwtService,
     private readonly mailer: MailerService,
   ) {}
@@ -24,14 +26,27 @@ export class AuthService {
       throw new UnauthorizedException('Account is deactivated. Contact your administrator.');
     }
 
+    const tenant = await this.tenantsService.findById(user.tenantId).catch(() => null);
+    if (!tenant) {
+      throw new UnauthorizedException('Account is deactivated. Contact your administrator.');
+    }
+    if (tenant.status !== TenantStatus.ACTIVE && user.role !== Role.SUPER_ADMIN) {
+      throw new UnauthorizedException(
+        tenant.status === TenantStatus.SUSPENDED
+          ? 'This account is suspended. Contact support.'
+          : 'This account has been closed.',
+      );
+    }
+
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       email: user.email,
       role: user.role,
+      tid: user.tenantId,
     });
 
     delete user.passwordHash;
-    return { accessToken, user };
+    return { accessToken, user, tenant };
   }
 
   me(user: User) {

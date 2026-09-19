@@ -7,7 +7,6 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import {
@@ -26,6 +25,7 @@ import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
 import { ComposeSmsDto } from './dto/compose-sms.dto';
 import { DispatchAiCallDto } from './dto/dispatch-ai-call.dto';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 /**
  * Voice-agent trunk keys, by region. India has no AI path (native dialer).
@@ -47,9 +47,9 @@ export class AiCallsService {
   constructor(
     private readonly dncService: DncService,
     private readonly notifications: NotificationsService,
-    @InjectRepository(CallLog)
+    @InjectTenantRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
     config: ConfigService,
   ) {
@@ -66,7 +66,7 @@ export class AiCallsService {
     const number = dto.phoneNumber.replace(/[\s\-().]/g, '');
     if (!number) throw new BadRequestException('phoneNumber is required');
 
-    if (this.dncService.isBlocked(number)) {
+    if (await this.dncService.isBlocked(number)) {
       throw new ForbiddenException(
         `${number} is on the Do Not Call list and cannot be dialled.`,
       );

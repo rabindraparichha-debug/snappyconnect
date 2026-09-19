@@ -1,11 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
 import { createHmac } from 'crypto';
 import { Repository } from 'typeorm';
 import { decryptString, encryptString } from '../common/crypto.util';
 import { CreateWebhookDto, UpdateWebhookDto } from './dto/webhook.dto';
 import { Webhook, WebhookEvent } from './webhook.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 const TIMEOUT_MS = 8000;
 
@@ -14,7 +14,7 @@ export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
 
   constructor(
-    @InjectRepository(Webhook)
+    @InjectTenantRepository(Webhook)
     private readonly repo: Repository<Webhook>,
     private readonly config: ConfigService,
   ) {}

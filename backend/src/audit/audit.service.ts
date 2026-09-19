@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { AuditAction, AuditLog } from './audit-log.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 export interface AuditContext {
   targetId?: string | null;
@@ -15,7 +15,7 @@ export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(
-    @InjectRepository(AuditLog)
+    @InjectTenantRepository(AuditLog)
     private readonly repo: Repository<AuditLog>,
   ) {}
 

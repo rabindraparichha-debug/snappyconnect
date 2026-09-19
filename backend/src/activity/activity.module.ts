@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantOrmModule } from '../common/tenant-orm.module';
 import { ActivityLog } from './activity.entity';
 import { ActivityController } from './activity.controller';
 import { ActivityService } from './activity.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ActivityLog])],
+  imports: [TypeOrmModule.forFeature([ActivityLog]), TenantOrmModule.forFeature([ActivityLog])],
   controllers: [ActivityController],
   providers: [ActivityService],
   exports: [ActivityService],

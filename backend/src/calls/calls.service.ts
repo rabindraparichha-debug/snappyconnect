@@ -4,7 +4,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import {
   CallDirection,
@@ -34,15 +33,16 @@ import { CompleteRequestDto } from './dto/complete-request.dto';
 import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class CallsService {
   private readonly logger = new Logger(CallsService.name);
 
   constructor(
-    @InjectRepository(CallLog)
+    @InjectTenantRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
-    @InjectRepository(CallRequest)
+    @InjectTenantRepository(CallRequest)
     private readonly requestsRepo: Repository<CallRequest>,
     private readonly providersService: ProvidersService,
     private readonly notificationsService: NotificationsService,
@@ -61,7 +61,7 @@ export class CallsService {
     region?: Region,
   ): Promise<InitiateCallResult> {
     const number = phoneNumber.trim();
-    if (this.dncService.isBlocked(number)) {
+    if (await this.dncService.isBlocked(number)) {
       throw new ForbiddenException(
         `${number} is on the Do Not Call list and cannot be dialled.`,
       );

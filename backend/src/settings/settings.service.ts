@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { decryptString, encryptString } from '../common/crypto.util';
+import { TenantContext } from '../common/tenant-context';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
+import { Tenant } from '../tenants/tenant.entity';
 import { Setting } from './setting.entity';
 
 export const PROVIDER_SETTING_KEYS = ['telnyx', 'grandstream', 'dinstar', 'asterisk', 'ai'] as const;
@@ -18,19 +21,64 @@ export class SettingsService {
   private readonly encryptionKey: string;
 
   constructor(
-    @InjectRepository(Setting)
+    @InjectTenantRepository(Setting)
     private readonly settingsRepo: Repository<Setting>,
+    @InjectRepository(Tenant)
+    private readonly tenantsRepo: Repository<Tenant>,
+    private readonly tenantContext: TenantContext,
     config: ConfigService,
   ) {
     this.encryptionKey = config.get<string>('SETTINGS_ENCRYPTION_KEY', 'dev-settings-key');
   }
 
-  /** Decrypted settings object for internal (provider) use. */
+  /**
+   * Decrypted settings object for internal (provider) use.
+   *
+   * Requires a tenant in scope. Provider settings hold API keys and the numbers
+   * calls are billed against, so resolving them without a tenant would pick an
+   * arbitrary customer's credentials — background and webhook callers must
+   * name the tenant via `getProviderSettingsForTenant`.
+   */
   async getProviderSettings(key: ProviderSettingKey): Promise<Record<string, any>> {
+    this.tenantContext.requireTenantId();
     const row = await this.settingsRepo.findOne({ where: { key } });
-    if (!row) return {};
+    return this.decode(row?.value);
+  }
+
+  /**
+   * Settings for infrastructure shared by every tenant — the UAE Asterisk box
+   * and its AMI credentials — which are held against the platform's own
+   * ("default") tenant. Used by background services that run at boot, outside
+   * any request, and so have no tenant to inherit.
+   */
+  async getPlatformProviderSettings(key: ProviderSettingKey): Promise<Record<string, any>> {
+    return this.tenantContext.runUnscoped(async () => {
+      const platform = await this.tenantsRepo.findOne({ where: { slug: 'default' } });
+      if (!platform) return {};
+      const row = await this.settingsRepo.findOne({ where: { tenantId: platform.id, key } });
+      return this.decode(row?.value);
+    });
+  }
+
+  /**
+   * Provider settings for an explicitly named tenant. For callers that resolve
+   * their own tenant — provider webhooks, scheduled sends — rather than
+   * inheriting one from a signed-in user.
+   */
+  async getProviderSettingsForTenant(
+    tenantId: string,
+    key: ProviderSettingKey,
+  ): Promise<Record<string, any>> {
+    const row = await this.tenantContext.runUnscoped(() =>
+      this.settingsRepo.findOne({ where: { tenantId, key } }),
+    );
+    return this.decode(row?.value);
+  }
+
+  private decode(value?: string): Record<string, any> {
+    if (!value) return {};
     try {
-      return JSON.parse(decryptString(row.value, this.encryptionKey));
+      return JSON.parse(decryptString(value, this.encryptionKey));
     } catch {
       return {};
     }

@@ -9,7 +9,11 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\"",
+    "migration:run": "npm run build && typeorm migration:run -d dist/data-source.js",
+    "migration:revert": "npm run build && typeorm migration:revert -d dist/data-source.js",
+    "migration:show": "npm run build && typeorm migration:show -d dist/data-source.js",
+    "migration:generate": "npm run build && typeorm migration:generate -d dist/data-source.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -25,6 +29,7 @@
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "dotenv": "^17.4.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.12.0",

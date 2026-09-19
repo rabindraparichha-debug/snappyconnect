@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallStatus, Role, UserStatus } from '../common/enums';
 import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 const ANSWERED = [CallStatus.ANSWERED, CallStatus.COMPLETED];
 const MISSED = [CallStatus.MISSED, CallStatus.NO_ANSWER];
@@ -11,9 +11,9 @@ const MISSED = [CallStatus.MISSED, CallStatus.NO_ANSWER];
 @Injectable()
 export class DashboardService {
   constructor(
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
-    @InjectRepository(CallLog)
+    @InjectTenantRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
   ) {}
 

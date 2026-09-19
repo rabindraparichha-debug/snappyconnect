@@ -23,6 +23,11 @@ export class ContactList {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   @Column({ type: 'varchar', length: 120 })
   name: string;
 
@@ -51,6 +56,14 @@ export class ContactList {
 export class ContactListItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /**
+   * Owning tenant. Denormalised from the parent list so an item can be scoped
+   * directly, without a join the scoped repository would have to know about.
+   */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
 
   @Index()
   @Column({ type: 'uuid' })

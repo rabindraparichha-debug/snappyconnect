@@ -24,6 +24,11 @@ export class ActivityLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   @Index()
   @Column({ type: 'uuid', nullable: true })
   userId: string | null;

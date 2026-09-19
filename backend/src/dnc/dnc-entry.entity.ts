@@ -6,16 +6,26 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  Unique,
 } from 'typeorm';
 import { User } from '../users/user.entity';
 
 @Entity('dnc_entries')
+@Unique('UQ_dnc_tenant_number', ['tenantId', 'phoneNumber'])
 export class DncEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  /** Stored normalised (digits, optional leading +) so lookups are exact. */
-  @Index({ unique: true })
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
+  /**
+   * Stored normalised (digits, optional leading +) so lookups are exact.
+   * Unique per tenant, not globally: a number one customer has suppressed says
+   * nothing about another customer's relationship with that person.
+   */
   @Column({ type: 'varchar', length: 32 })
   phoneNumber: string;
 

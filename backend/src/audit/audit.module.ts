@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantOrmModule } from '../common/tenant-orm.module';
 import { AuditLog } from './audit-log.entity';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
@@ -10,7 +11,7 @@ import { AuditService } from './audit.service';
  */
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([AuditLog])],
+  imports: [TypeOrmModule.forFeature([AuditLog]), TenantOrmModule.forFeature([AuditLog])],
   controllers: [AuditController],
   providers: [AuditService],
   exports: [AuditService],

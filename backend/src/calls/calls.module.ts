@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantOrmModule } from '../common/tenant-orm.module';
 import { ActivityModule } from '../activity/activity.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { DncModule } from '../dnc/dnc.module';
@@ -19,8 +20,10 @@ import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
 
 @Module({
-  imports: [VoicemailsModule, 
+  imports: [
+    VoicemailsModule,
     TypeOrmModule.forFeature([CallLog, CallRequest, User]),
+    TenantOrmModule.forFeature([CallLog, CallRequest, User]),
     ProvidersModule,
     SettingsModule,
     SmsModule,

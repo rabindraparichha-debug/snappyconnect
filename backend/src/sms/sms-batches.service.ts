@@ -7,12 +7,12 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, Repository } from 'typeorm';
 import { Role } from '../common/enums';
 import { User } from '../users/user.entity';
 import { SmsBatch, SmsBatchItem, SmsBatchStatus } from './sms-batch.entity';
 import { SmsService } from './sms.service';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 // ---- Hard limits (server-side; the UI mirrors them but cannot loosen them) --
 export const BATCH_LIMITS = {
@@ -49,11 +49,11 @@ export class SmsBatchesService implements OnModuleInit, OnModuleDestroy {
   private ticking = false;
 
   constructor(
-    @InjectRepository(SmsBatch)
+    @InjectTenantRepository(SmsBatch)
     private readonly batchesRepo: Repository<SmsBatch>,
-    @InjectRepository(SmsBatchItem)
+    @InjectTenantRepository(SmsBatchItem)
     private readonly itemsRepo: Repository<SmsBatchItem>,
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly smsService: SmsService,
   ) {}

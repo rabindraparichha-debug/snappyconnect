@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Role } from '../common/enums';
 import { User } from '../users/user.entity';
@@ -20,6 +19,7 @@ import {
   UpdateContactItemDto,
   UpdateContactListDto,
 } from './dto/contact-list.dto';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 export interface ImportResult {
   imported: number;
@@ -31,9 +31,9 @@ export interface ImportResult {
 @Injectable()
 export class ContactListsService {
   constructor(
-    @InjectRepository(ContactList)
+    @InjectTenantRepository(ContactList)
     private readonly listsRepo: Repository<ContactList>,
-    @InjectRepository(ContactListItem)
+    @InjectTenantRepository(ContactListItem)
     private readonly itemsRepo: Repository<ContactListItem>,
   ) {}
 

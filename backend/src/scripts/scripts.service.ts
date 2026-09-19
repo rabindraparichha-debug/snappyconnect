@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallScript } from './call-script.entity';
 import { CreateCallScriptDto, UpdateCallScriptDto } from './dto/call-script.dto';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class ScriptsService {
   constructor(
-    @InjectRepository(CallScript)
+    @InjectTenantRepository(CallScript)
     private readonly repo: Repository<CallScript>,
   ) {}
 

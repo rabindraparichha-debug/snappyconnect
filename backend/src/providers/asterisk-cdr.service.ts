@@ -20,8 +20,13 @@ import { AmiEvent, AsteriskAmiService } from './asterisk-ami.service';
 export class AsteriskCdrService implements OnModuleInit {
   private readonly logger = new Logger(AsteriskCdrService.name);
 
-  /** sipUsername → userId, refreshed lazily so new recruiters are picked up. */
-  private lineToUser = new Map<string, string>();
+  /**
+   * sipUsername → the recruiter that line belongs to, refreshed lazily so new
+   * recruiters are picked up. The tenant is carried alongside the id: this
+   * service listens outside any request, so the CDR row it writes has no
+   * tenant of its own and has to inherit the one the line is attributed to.
+   */
+  private lineToUser = new Map<string, { id: string; tenantId: string }>();
   private lineCacheAt = 0;
 
   constructor(
@@ -59,7 +64,16 @@ export class AsteriskCdrService implements OnModuleInit {
     if (existing) return;
 
     const line = this.lineFromChannel(event.Channel) ?? this.lineFromChannel(event.DestinationChannel);
-    const userId = line ? await this.resolveUser(line) : null;
+    const owner = line ? await this.resolveUser(line) : null;
+    if (!owner) {
+      // Every row belongs to a tenant, and an unattributable channel gives us
+      // no way to pick one. Logging it against an arbitrary tenant would put a
+      // stranger's call in that customer's history, so it is dropped instead.
+      this.logger.warn(
+        `CDR ${uniqueId} on channel ${event.Channel ?? '?'} matched no recruiter line — not logged`,
+      );
+      return;
+    }
 
     // Inbound = a call that arrived from the UCM trunk to a recruiter line.
     const inbound = /ucmtrunk/i.test(event.Channel ?? '');
@@ -76,7 +90,8 @@ export class AsteriskCdrService implements OnModuleInit {
 
     await this.callLogsRepo.save(
       this.callLogsRepo.create({
-        userId,
+        userId: owner.id,
+        tenantId: owner.tenantId,
         phoneNumber: inbound ? event.Source || 'unknown' : event.Destination || 'unknown',
         provider: CallingProvider.ASTERISK,
         direction: inbound ? CallDirection.INBOUND : CallDirection.OUTBOUND,
@@ -102,13 +117,18 @@ export class AsteriskCdrService implements OnModuleInit {
     return match ? match[1] : null;
   }
 
-  private async resolveUser(line: string): Promise<string | null> {
+  private async resolveUser(line: string): Promise<{ id: string; tenantId: string } | null> {
     if (Date.now() - this.lineCacheAt > 60_000) {
+      // Deliberately every tenant's users: the UAE Asterisk box is shared, so a
+      // channel could belong to any of them.
       const users = await this.usersRepo.find();
       this.lineToUser = new Map(
         users
           .filter((u) => u.providerConfig?.sipUsername)
-          .map((u) => [String(u.providerConfig.sipUsername), u.id]),
+          .map((u) => [
+            String(u.providerConfig.sipUsername),
+            { id: u.id, tenantId: u.tenantId },
+          ]),
       );
       this.lineCacheAt = Date.now();
     }

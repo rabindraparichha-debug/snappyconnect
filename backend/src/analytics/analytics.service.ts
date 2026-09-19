@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { CallLog } from '../calls/call-log.entity';
 import { CallDirection, CallStatus, Role } from '../common/enums';
 import { User } from '../users/user.entity';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 const CONNECTED = [CallStatus.ANSWERED, CallStatus.COMPLETED];
 const MISSED = [CallStatus.MISSED, CallStatus.NO_ANSWER];
@@ -12,8 +12,8 @@ const MISSED = [CallStatus.MISSED, CallStatus.NO_ANSWER];
 @Injectable()
 export class AnalyticsService {
   constructor(
-    @InjectRepository(CallLog) private readonly callLogsRepo: Repository<CallLog>,
-    @InjectRepository(User) private readonly usersRepo: Repository<User>,
+    @InjectTenantRepository(CallLog) private readonly callLogsRepo: Repository<CallLog>,
+    @InjectTenantRepository(User) private readonly usersRepo: Repository<User>,
   ) {}
 
   // ---------- Recruiter Analytics ----------

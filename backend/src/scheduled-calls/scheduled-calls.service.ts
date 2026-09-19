@@ -1,5 +1,4 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '../common/enums';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -10,13 +9,14 @@ import {
   UpdateScheduledCallDto,
 } from './dto/scheduled-call.dto';
 import { ScheduledCall, ScheduledCallStatus } from './scheduled-call.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class ScheduledCallsService {
   private readonly logger = new Logger(ScheduledCallsService.name);
 
   constructor(
-    @InjectRepository(ScheduledCall)
+    @InjectTenantRepository(ScheduledCall)
     private readonly repo: Repository<ScheduledCall>,
     private readonly notificationsService: NotificationsService,
   ) {}

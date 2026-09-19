@@ -14,6 +14,10 @@ export class RolesGuard implements CanActivate {
     ]);
     if (!requiredRoles || requiredRoles.length === 0) return true;
     const { user } = context.switchToHttp().getRequest();
-    return !!user && requiredRoles.includes(user.role);
+    if (!user) return false;
+    // The platform operator outranks every tenant-level role, so existing
+    // @Roles(ADMIN) routes keep working for them without being re-annotated.
+    if (user.role === Role.SUPER_ADMIN) return true;
+    return requiredRoles.includes(user.role);
   }
 }

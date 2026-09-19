@@ -5,10 +5,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { Region, Role, UserStatus } from '../common/enums';
+import { TenantContext } from '../common/tenant-context';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 import { SipPoolService } from '../providers/sip-pool.service';
 import { AssignProviderDto } from './dto/assign-provider.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -21,9 +22,10 @@ export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
   constructor(
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly sipPool: SipPoolService,
+    private readonly tenantContext: TenantContext,
   ) {}
 
   /**
@@ -35,7 +37,10 @@ export class UsersService {
     if (!(user.regions ?? []).includes(Region.UAE)) return;
     if (user.providerConfig?.sipUsername) return;
 
-    const all = await this.usersRepo.find();
+    // The UAE Asterisk pool is one shared box across every tenant, so the set
+    // of taken lines has to be read platform-wide. Scoped to a single tenant
+    // this would hand out a line another tenant is already using.
+    const all = await this.tenantContext.runUnscoped(() => this.usersRepo.find());
     const taken = new Set<string>(
       all.map((u) => u.providerConfig?.sipUsername).filter(Boolean),
     );
@@ -81,7 +86,12 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto): Promise<User> {
-    const existing = await this.usersRepo.findOne({ where: { email: dto.email.toLowerCase() } });
+    // Email is unique platform-wide, so the check has to look past the current
+    // tenant — otherwise this reports "available" and the insert then fails on
+    // the unique index with a 500 instead of a clean conflict.
+    const existing = await this.tenantContext.runUnscoped(() =>
+      this.usersRepo.findOne({ where: { email: dto.email.toLowerCase() } }),
+    );
     if (existing) throw new ConflictException('A user with this email already exists');
 
     const { password, ...rest } = dto;
@@ -173,9 +183,10 @@ export class UsersService {
     const user = await this.findById(id);
 
     if (dto.email && dto.email.toLowerCase() !== user.email) {
-      const existing = await this.usersRepo.findOne({
-        where: { email: dto.email.toLowerCase() },
-      });
+      // Platform-wide for the same reason as in create().
+      const existing = await this.tenantContext.runUnscoped(() =>
+        this.usersRepo.findOne({ where: { email: dto.email!.toLowerCase() } }),
+      );
       if (existing) throw new ConflictException('A user with this email already exists');
       user.email = dto.email.toLowerCase();
     }

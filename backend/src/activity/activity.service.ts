@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ActivityLog, ActivityType } from './activity.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class ActivityService {
   constructor(
-    @InjectRepository(ActivityLog)
+    @InjectTenantRepository(ActivityLog)
     private readonly repo: Repository<ActivityLog>,
   ) {}
 

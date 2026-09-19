@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -11,6 +11,9 @@ import { AuthModule } from './auth/auth.module';
 import { CallsModule } from './calls/calls.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { TenantContextInterceptor } from './common/tenant-context.interceptor';
+import { TenantOrmModule } from './common/tenant-orm.module';
+import { TenantsModule } from './tenants/tenants.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ProvidersModule } from './providers/providers.module';
@@ -45,9 +48,16 @@ import { UsersModule } from './users/users.module';
         password: config.get<string>('DATABASE_PASSWORD', 'postgres'),
         database: config.get<string>('DATABASE_NAME', 'snappyconnect'),
         autoLoadEntities: true,
-        synchronize: config.get<string>('DATABASE_SYNCHRONIZE', 'true') === 'true',
+        // Defaults to OFF. `synchronize` alters the live schema to match the
+        // entities on boot and will drop a column to do it, which is not
+        // survivable now that tenant data shares these tables. Schema changes
+        // go through `npm run migration:run`.
+        synchronize: config.get<string>('DATABASE_SYNCHRONIZE', 'false') === 'true',
+        migrationsRun: false,
       }),
     }),
+    TenantOrmModule,
+    TenantsModule,
     AiModule,
     AnalyticsModule,
     AuthModule,
@@ -75,6 +85,9 @@ import { UsersModule } from './users/users.module';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Runs after the guards above, so the authenticated user — and therefore
+    // the tenant — is known before any handler touches the database.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
 export class AppModule {}
