@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider, CallRequestStatus } from '../common/enums';
 import { CallRequest } from '../calls/call-request.entity';
@@ -8,6 +7,7 @@ import {
   InitiateCallInput,
   InitiateCallResult,
 } from './provider.interface';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 /**
  * Native Mobile Dialer (India). No VoIP: the browser queues a call request,
@@ -19,7 +19,7 @@ export class NativeDialerProvider implements CallingProviderStrategy {
   readonly key = CallingProvider.NATIVE_DIALER;
 
   constructor(
-    @InjectRepository(CallRequest)
+    @InjectTenantRepository(CallRequest)
     private readonly requestsRepo: Repository<CallRequest>,
   ) {}
 

@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import * as https from 'https';
 import { Repository } from 'typeorm';
@@ -11,6 +10,7 @@ import {
   InitiateCallInput,
   InitiateCallResult,
 } from './provider.interface';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 /**
  * Grandstream UCM PBX + Dinstar gateway (UAE).
@@ -27,7 +27,7 @@ export class GrandstreamProvider implements CallingProviderStrategy {
 
   constructor(
     private readonly settings: SettingsService,
-    @InjectRepository(CallLog)
+    @InjectTenantRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
   ) {}
 

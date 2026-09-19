@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CallingProvider } from '../common/enums';
 import { toUsE164 } from '../common/phone.util';
@@ -11,6 +10,7 @@ import {
   InitiateCallInput,
   InitiateCallResult,
 } from './provider.interface';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 const TELNYX_API = 'https://api.telnyx.com/v2';
 
@@ -26,7 +26,7 @@ export class TelnyxProvider implements CallingProviderStrategy {
 
   constructor(
     private readonly settings: SettingsService,
-    @InjectRepository(User)
+    @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
     config: ConfigService,
   ) {

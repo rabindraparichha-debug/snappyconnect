@@ -58,6 +58,14 @@ export class VoiceWebhookController {
   constructor(
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
+    // Deliberately the unscoped repository. Telnyx calls this endpoint with no
+    // credentials of ours, so there is no signed-in user to take a tenant from
+    // and the lookup has to span every tenant to find the number's owner.
+    //
+    // TODO(multi-tenancy): once numbers are provisioned per tenant, resolve the
+    // tenant from the called number and run the rest of the handler inside it.
+    // Until then this path still assumes one shared inbound number, so inbound
+    // routing is not tenant-aware.
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly voicemails: VoicemailsService,
