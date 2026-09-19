@@ -58,6 +58,7 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [provisioning, setProvisioning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -107,6 +108,7 @@ export default function UsersPage() {
       weeklyCallTarget: user.weeklyCallTarget ? String(user.weeklyCallTarget) : '',
     });
     setFormError(null);
+    setShowAdvanced(false);
     setModalOpen(true);
   }
 
@@ -127,13 +129,11 @@ export default function UsersPage() {
     if (form.ivrDigit.trim()) {
       providerConfig.ivrDigit = form.ivrDigit.trim();
     }
-    if (form.provider === 'grandstream' && form.grandstreamExtension) {
+    if (form.grandstreamExtension.trim()) {
       providerConfig.extension = form.grandstreamExtension.trim();
     }
-    if (form.provider === 'asterisk') {
-      if (form.sipUsername) providerConfig.sipUsername = form.sipUsername.trim();
-      if (form.sipPassword) providerConfig.sipPassword = form.sipPassword.trim();
-    }
+    if (form.sipUsername.trim()) providerConfig.sipUsername = form.sipUsername.trim();
+    if (form.sipPassword.trim()) providerConfig.sipPassword = form.sipPassword.trim();
 
     const body: Record<string, unknown> = {
       name: form.name,
@@ -440,45 +440,11 @@ export default function UsersPage() {
               <option value="admin">Admin</option>
             </Select>
           </div>
-          <div>
-            <Label>Calling Provider</Label>
-            <Select
-              value={form.provider}
-              onChange={(e) => setForm({ ...form, provider: e.target.value as UserForm['provider'] })}
-            >
-              <option value="">Unassigned</option>
-              <option value="telnyx">Telnyx (USA)</option>
-              <option value="grandstream">Grandstream PBX (UAE)</option>
-              <option value="native_dialer">Native Dialer (India)</option>
-              <option value="asterisk">In-App SIP (UAE)</option>
-            </Select>
-          </div>
-          {(form.provider === 'telnyx' || form.regions.includes('usa')) && (
-            <>
-              <div>
-                <Label>Telnyx Credential ID (optional)</Label>
-                <Input
-                  placeholder="Uses global credential if empty"
-                  value={form.telnyxCredentialId}
-                  onChange={(e) => setForm({ ...form, telnyxCredentialId: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Board-line menu digit (optional)</Label>
-                <Input
-                  placeholder="1-9 — callers press this to reach them"
-                  value={form.ivrDigit}
-                  onChange={(e) => setForm({ ...form, ivrDigit: e.target.value })}
-                />
-              </div>
-            </>
-          )}
-
           <div className="col-span-full">
             <Label>Calling regions</Label>
             <p className="mb-2 text-xs text-slate-500">
-              Which regions this user can call from in the app. Leave empty to use only the
-              provider above.
+              Which regions this user can call from. Lines and extensions are assigned
+              automatically — nothing else to configure.
             </p>
             <div className="grid gap-2 sm:grid-cols-3">
               {REGIONS.map((region) => {
@@ -517,23 +483,72 @@ export default function UsersPage() {
             </div>
           </div>
 
-          {(form.provider === 'grandstream' || form.regions.includes('uae')) && (
-            <div>
-              <Label>Wave Extension (optional)</Label>
-              <Input
-                placeholder="e.g. 1021 — uses shared extension if empty"
-                value={form.grandstreamExtension}
-                onChange={(e) => setForm({ ...form, grandstreamExtension: e.target.value })}
-              />
+          {editing && (editing.providerConfig?.sipUsername || editing.providerConfig?.telnyxNumber || editing.providerConfig?.ivrDigit) && (
+            <div className="col-span-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-700">Assigned automatically:</span>{' '}
+              {[
+                editing.providerConfig?.sipUsername && `UAE extension ${editing.providerConfig.sipUsername}`,
+                editing.providerConfig?.telnyxNumber && `US line ${editing.providerConfig.telnyxNumber}`,
+                editing.providerConfig?.ivrDigit && `board-line digit ${editing.providerConfig.ivrDigit}`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </div>
           )}
 
-          {(form.provider === 'asterisk' || form.regions.includes('uae')) && (
+          <div className="col-span-full">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              {showAdvanced ? '▾ Hide advanced overrides' : '▸ Advanced overrides (rarely needed)'}
+            </button>
+          </div>
+
+          {showAdvanced && (
             <>
+              <div>
+                <Label>Calling Provider (legacy)</Label>
+                <Select
+                  value={form.provider}
+                  onChange={(e) => setForm({ ...form, provider: e.target.value as UserForm['provider'] })}
+                >
+                  <option value="">Auto (from regions)</option>
+                  <option value="telnyx">Telnyx (USA)</option>
+                  <option value="grandstream">Grandstream PBX (UAE)</option>
+                  <option value="native_dialer">Native Dialer (India)</option>
+                  <option value="asterisk">In-App SIP (UAE)</option>
+                </Select>
+              </div>
+              <div>
+                <Label>Telnyx Credential ID</Label>
+                <Input
+                  placeholder="Uses global credential if empty"
+                  value={form.telnyxCredentialId}
+                  onChange={(e) => setForm({ ...form, telnyxCredentialId: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Board-line menu digit</Label>
+                <Input
+                  placeholder="1-9 — auto-assigned if empty"
+                  value={form.ivrDigit}
+                  onChange={(e) => setForm({ ...form, ivrDigit: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Wave Extension</Label>
+                <Input
+                  placeholder="Legacy Wave app only"
+                  value={form.grandstreamExtension}
+                  onChange={(e) => setForm({ ...form, grandstreamExtension: e.target.value })}
+                />
+              </div>
               <div>
                 <Label>SIP Username</Label>
                 <Input
-                  placeholder="e.g. 2001"
+                  placeholder="Auto-assigned from the pool if empty"
                   value={form.sipUsername}
                   onChange={(e) => setForm({ ...form, sipUsername: e.target.value })}
                 />
@@ -542,7 +557,7 @@ export default function UsersPage() {
                 <Label>SIP Password</Label>
                 <Input
                   type="password"
-                  placeholder="From the Asterisk server accounts"
+                  placeholder="Auto-assigned with the extension"
                   value={form.sipPassword}
                   onChange={(e) => setForm({ ...form, sipPassword: e.target.value })}
                 />
