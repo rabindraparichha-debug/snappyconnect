@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
 import { toUsE164 } from '../common/phone.util';
 import { ActivityService } from '../activity/activity.service';
@@ -13,6 +13,7 @@ import { toE164 } from '../contact-lists/csv.util';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookEvent } from '../webhooks/webhook.entity';
 import { DncService } from '../dnc/dnc.service';
+import { SettingsService } from '../settings/settings.service';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { SmsLog } from './sms-log.entity';
 
@@ -28,6 +29,7 @@ export class SmsService {
     private readonly activityService: ActivityService,
     private readonly webhooksService: WebhooksService,
     private readonly dncService: DncService,
+    private readonly settings: SettingsService,
   ) {}
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
@@ -51,11 +53,28 @@ export class SmsService {
       );
     }
 
-    // 10DLC campaigns require an opt-out notice; append it unless the
-    // message already carries one.
+    // 10DLC campaigns require an opt-out notice, but only on the first message
+    // of a conversation — repeating it on every reply burns a third of each
+    // segment and reads as spam to the candidate. Later messages carry it
+    // again only if the recruiter writes it themselves.
     let body = dto.body;
-    if (!/\bSTOP\b/i.test(body)) {
-      body = `${body.trimEnd()}\n\nReply STOP to opt out.`;
+    const alreadyMessaged =
+      (await this.smsRepo.count({
+        where: {
+          phoneNumber: to,
+          direction: SmsDirection.OUTBOUND,
+          status: Not(SmsStatus.FAILED),
+        },
+      })) > 0;
+    if (!alreadyMessaged && !/\bSTOP\b/i.test(body)) {
+      // Editable in Settings → Telnyx; blank switches it off (only do that if
+      // consent is collected elsewhere — 10DLC requires an opt-out path).
+      const cfg = await this.settings.getProviderSettings('telnyx');
+      const footer =
+        typeof cfg.smsOptOutFooter === 'string'
+          ? cfg.smsOptOutFooter.trim()
+          : 'Reply STOP to opt out.';
+      if (footer) body = `${body.trimEnd()}\n\n${footer}`;
     }
 
     const log = this.smsRepo.create({

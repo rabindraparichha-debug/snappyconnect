@@ -29,6 +29,18 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
       { key: 'connectionId', label: 'Connection ID' },
       { key: 'fromNumber', label: 'Default From Number', placeholder: '+15550001234' },
       { key: 'messagingProfileId', label: 'Messaging Profile ID (SMS)' },
+      {
+        key: 'parkedNumbers',
+        label: 'Parked Numbers',
+        placeholder: '+15125550100, +15125550101',
+        hint: 'Held back from "Assign number" — e.g. spam-flagged numbers cooling off. Comma-separated.',
+      },
+      {
+        key: 'smsOptOutFooter',
+        label: 'SMS Opt-out Footer',
+        placeholder: 'Reply STOP to opt out.',
+        hint: 'Added to the first message to each contact only. Required by 10DLC — leave blank only if consent is captured elsewhere.',
+      },
     ],
   },
   {

@@ -12,9 +12,10 @@ import { SmsBatchesController } from './sms-batches.controller';
 import { SmsBatchesService } from './sms-batches.service';
 import { SmsService } from './sms.service';
 import { DncModule } from '../dnc/dnc.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SmsLog, SmsBatch, SmsBatchItem, User]), ProvidersModule, NotificationsModule, ActivityModule, WebhooksModule, DncModule],
+  imports: [TypeOrmModule.forFeature([SmsLog, SmsBatch, SmsBatchItem, User]), ProvidersModule, NotificationsModule, ActivityModule, WebhooksModule, DncModule, SettingsModule],
   controllers: [SmsBatchesController, SmsController],
   providers: [SmsService, SmsBatchesService],
   exports: [SmsService],

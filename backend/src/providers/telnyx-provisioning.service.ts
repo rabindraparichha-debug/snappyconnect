@@ -131,7 +131,17 @@ export class TelnyxProvisioningService {
     const taken = new Set(
       users.map((u) => u.providerConfig?.telnyxNumber).filter(Boolean) as string[],
     );
-    const parked = new Set<string>(cfg.parkedNumbers ?? []);
+    // Admins type this in Settings as a comma-separated list, so accept both
+    // that and the array shape older installs stored.
+    const rawParked = cfg.parkedNumbers;
+    const parked = new Set<string>(
+      (Array.isArray(rawParked)
+        ? rawParked
+        : String(rawParked ?? '').split(',')
+      )
+        .map((n) => String(n).trim())
+        .filter(Boolean),
+    );
     return numbers
       .map((n) => n.phoneNumber)
       .filter((n) => !taken.has(n) && !parked.has(n));
