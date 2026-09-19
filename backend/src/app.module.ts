@@ -18,6 +18,7 @@ import { SeedModule } from './seed/seed.module';
 import { SettingsModule } from './settings/settings.module';
 import { SmsModule } from './sms/sms.module';
 import { VoicemailsModule } from './voicemails/voicemails.module';
+import { VoiceRequestsModule } from './voice-requests/voice-requests.module';
 import { ActivityModule } from './activity/activity.module';
 import { ScheduledCallsModule } from './scheduled-calls/scheduled-calls.module';
 import { ScriptsModule } from './scripts/scripts.module';
@@ -56,6 +57,7 @@ import { UsersModule } from './users/users.module';
     CallsModule,
     SmsModule,
     VoicemailsModule,
+    VoiceRequestsModule,
     DashboardModule,
     NotificationsModule,
     ActivityModule,

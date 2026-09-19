@@ -18,6 +18,7 @@ const NAV = [
   { href: '/schedule', label: 'Schedule', icon: CalendarIcon, adminOnly: false },
   { href: '/sms', label: 'Messages', icon: ChatIcon, adminOnly: false },
   { href: '/voicemail', label: 'Voicemail', icon: VoicemailIcon, adminOnly: false },
+  { href: '/voice', label: 'My AI Voice', icon: MicIcon, adminOnly: false },
   { href: '/ai', label: 'AI Assistant', icon: SparkIcon, adminOnly: false },
   { href: '/ai-calls', label: 'AI Calls', icon: BotIcon, adminOnly: false },
   { href: '/reports', label: 'Reports', icon: ChartIcon, adminOnly: true },

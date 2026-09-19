@@ -11,5 +11,6 @@ import { AiCallsService } from './ai-calls.service';
   imports: [TypeOrmModule.forFeature([CallLog, User]), DncModule, NotificationsModule],
   controllers: [AiCallsController],
   providers: [AiCallsService],
+  exports: [AiCallsService],
 })
 export class AiCallsModule {}
