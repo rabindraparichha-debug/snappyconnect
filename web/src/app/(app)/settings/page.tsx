@@ -173,6 +173,7 @@ export default function SettingsPage() {
               initial={settings[section.key] ?? {}}
             />
           ))}
+          <VoicesSection />
           <CallScriptsSection />
           <WebhooksSection />
           <DncSection />
@@ -846,6 +847,126 @@ function ScriptEditor({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Create a cloned voice for the AI agent and see what is available to assign.
+ *
+ * Cloning is a rights question as much as a technical one: only upload a
+ * recording of someone who has agreed to it, which is why the card says so.
+ */
+function VoicesSection() {
+  const [voices, setVoices] = useState<{ id: string; name: string }[] | null>(null);
+  const [name, setName] = useState('');
+  const [provider, setProvider] = useState('cartesia');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api<{ id: string; name: string }[]>('/ai-calls/voices')
+      .then(setVoices)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load voices'));
+  }, []);
+
+  useEffect(load, [load]);
+
+  async function clone(e: FormEvent) {
+    e.preventDefault();
+    if (!file || !name.trim()) return;
+    setBusy(true);
+    setError(null);
+    setCreated(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('name', name.trim());
+      form.append('provider', provider);
+      const res = await api<{ voice_id: string; name: string }>('/ai-calls/voices/clone', {
+        method: 'POST',
+        body: form,
+      });
+      setCreated(`${res.name} — ${res.voice_id}`);
+      setName('');
+      setFile(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cloning failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-base font-semibold text-slate-900">AI Voices</h2>
+      <p className="mt-0.5 text-sm text-slate-500">
+        Clone a voice from a clean 15–30 second sample, then assign it to an AI agent. Only upload a
+        recording of someone who has agreed their voice may be cloned.
+      </p>
+
+      <form onSubmit={clone} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <Label>Voice name</Label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Lipsa — client calls"
+          />
+        </div>
+        <div>
+          <Label>Quality</Label>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="block w-full rounded-lg border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-inset focus:ring-brand-600"
+          >
+            <option value="cartesia">Standard (Cartesia) — cheaper</option>
+            <option value="elevenlabs">Premium (ElevenLabs) — closer likeness</option>
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <Label>Sample (mp3, wav or m4a, up to 25 MB)</Label>
+          <input
+            type="file"
+            accept="audio/*"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            One speaker, no music or background noise. Phone audio hides fine detail, so a clean
+            recording matters more than a long one.
+          </p>
+        </div>
+        <div className="sm:col-span-2 flex items-center justify-end gap-3">
+          {created && <span className="text-sm font-medium text-emerald-600">Created: {created}</span>}
+          {error && <span className="text-sm text-rose-600">{error}</span>}
+          <Button type="submit" disabled={busy || !file || !name.trim()}>
+            {busy ? 'Cloning…' : 'Create voice'}
+          </Button>
+        </div>
+      </form>
+
+      <div className="mt-6">
+        <Label>Available voices</Label>
+        {voices === null ? (
+          <p className="mt-1 text-sm text-slate-400">Loading…</p>
+        ) : voices.length === 0 ? (
+          <p className="mt-1 text-sm text-slate-400">None yet.</p>
+        ) : (
+          <ul className="mt-1 max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-lg ring-1 ring-slate-200">
+            {voices.map((v) => (
+              <li key={v.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                <span className="text-slate-700">{v.name}</span>
+                <code className="text-xs text-slate-400">{v.id}</code>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
   );
 }
 

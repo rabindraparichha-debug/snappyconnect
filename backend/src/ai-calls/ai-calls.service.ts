@@ -24,6 +24,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
+import { ComposeSmsDto } from './dto/compose-sms.dto';
 import { DispatchAiCallDto } from './dto/dispatch-ai-call.dto';
 
 /**
@@ -335,6 +336,70 @@ export class AiCallsService {
     }
   }
 
+  /**
+   * Draft one SMS from a recruiter's rough brief.
+   *
+   * Capped to a single segment: the sender appends the opt-out line, and a
+   * message that splits is billed twice and can arrive out of order.
+   */
+  async compose(dto: ComposeSmsDto): Promise<{ text: string; characters: number }> {
+    const res = await this.platformFetch(
+      'POST',
+      '/v1/compose',
+      JSON.stringify({
+        context: dto.context,
+        contact_name: dto.contactName,
+        company: dto.companyName,
+        max_chars: dto.maxChars ?? 140,
+      }),
+      { 'Content-Type': 'application/json' },
+    );
+    if (!res.ok) {
+      throw new ServiceUnavailableException(
+        `Could not draft the message (${res.status}).`,
+      );
+    }
+    return res.json();
+  }
+
+  /** Voices that can be assigned to an AI agent — stock plus clones. */
+  async voices(): Promise<{ id: string; name: string }[]> {
+    const res = await this.platformFetch('GET', '/v1/voices');
+    if (!res.ok) {
+      throw new ServiceUnavailableException(`Could not list voices (${res.status}).`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Clone a voice from an uploaded sample. The caller must hold the rights to
+   * the voice — consent is the operator's responsibility, not the platform's.
+   */
+  async cloneVoice(
+    name: string,
+    file: { buffer: Buffer; originalname?: string; mimetype?: string },
+    provider: string,
+  ): Promise<{ voice_id: string; name: string; provider: string }> {
+    const form = new FormData();
+    form.append('name', name);
+    form.append('provider', provider);
+    form.append(
+      'audio',
+      new Blob([new Uint8Array(file.buffer)], {
+        type: file.mimetype || 'audio/mpeg',
+      }),
+      file.originalname || 'sample.mp3',
+    );
+    const res = await this.platformFetch('POST', '/v1/voices/clone', form);
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new ServiceUnavailableException(
+        `Voice cloning failed (${res.status}): ${detail.slice(0, 200)}`,
+      );
+    }
+    return res.json();
+  }
+
   private async findByPlatformId(platformCallId: string): Promise<CallLog | null> {
     return this.callLogsRepo
       .createQueryBuilder('log')
@@ -345,12 +410,13 @@ export class AiCallsService {
   private async platformFetch(
     method: string,
     path: string,
-    body?: URLSearchParams,
+    body?: URLSearchParams | FormData | string,
+    extraHeaders: Record<string, string> = {},
   ): Promise<Response> {
     try {
       return await fetch(`${this.platformUrl}${path}`, {
         method,
-        headers: { Authorization: `Bearer ${this.platformKey}` },
+        headers: { Authorization: `Bearer ${this.platformKey}`, ...extraHeaders },
         body,
       });
     } catch {
