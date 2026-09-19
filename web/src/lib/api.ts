@@ -49,12 +49,20 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  // FormData carries its own multipart boundary: setting Content-Type by hand
+  // (or JSON-encoding it) corrupts file uploads.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  if (options.body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
 
   const res = await fetch(url.toString(), {
     method: options.method ?? 'GET',
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body:
+      options.body === undefined
+        ? undefined
+        : isForm
+          ? (options.body as FormData)
+          : JSON.stringify(options.body),
   });
 
   // A 401 from login itself means bad credentials, not an expired session.
