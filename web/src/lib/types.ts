@@ -1,4 +1,37 @@
-export type Role = 'admin' | 'user';
+export type Role = 'super_admin' | 'admin' | 'user';
+export type TenantStatus = 'active' | 'suspended' | 'canceled';
+
+/** True for the platform operator, who outranks every tenant-level role. */
+export function isPlatformOperator(role?: string): boolean {
+  return role === 'super_admin';
+}
+
+/** Tenant-level administrator or above. */
+export function isAdmin(role?: string): boolean {
+  return role === 'admin' || isPlatformOperator(role);
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  slug: string;
+  status: TenantStatus;
+  externalRef: string | null;
+  billingEmail: string | null;
+  seatLimit: number;
+  regions: Region[];
+  reservedNumbers: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantSeats {
+  used: number;
+  limit: number;
+}
+
+/** `GET /tenants/me` — the signed-in user's own account, with live seat usage. */
+export type OwnTenant = Tenant & { seats: TenantSeats };
 export type CallingProvider = 'telnyx' | 'grandstream' | 'native_dialer' | 'asterisk';
 export type UserStatus = 'active' | 'inactive';
 export type CallDirection = 'inbound' | 'outbound';
@@ -16,6 +49,8 @@ export type CallStatus =
 
 export interface User {
   id: string;
+  /** Tenant this account belongs to. */
+  tenantId: string;
   name: string;
   email: string;
   mobileNumber: string | null;

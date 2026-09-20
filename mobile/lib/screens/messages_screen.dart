@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../api/api_client.dart';
+import '../services/whatsapp_service.dart';
+import 'group_sms_screen.dart';
 import '../dial_intent.dart';
 import '../models.dart';
 import '../region.dart';
@@ -55,10 +58,21 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   Widget build(BuildContext context) {
     final hasSms = (_user?.allowedRegions ?? const []).contains(Regions.usa) ||
-        _user?.role == 'admin';
+        _user?.isAdmin == true;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Messages')),
+      appBar: AppBar(
+        title: const Text('Messages'),
+        actions: [
+          IconButton(
+            tooltip: 'Group SMS',
+            icon: const Icon(Icons.groups_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const GroupSmsScreen()),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: hasSms
           ? FloatingActionButton(
               onPressed: _openCompose,
@@ -218,6 +232,9 @@ class _SmsThreadScreenState extends State<SmsThreadScreen> {
   List<SmsMessage> _messages = [];
   bool _loading = true;
   bool _sending = false;
+  bool _listening = false;
+  bool _drafting = false;
+  final stt.SpeechToText _speech = stt.SpeechToText();
   String? _error;
   Timer? _pollTimer;
 
@@ -265,6 +282,122 @@ class _SmsThreadScreenState extends State<SmsThreadScreen> {
     });
   }
 
+  /// Dictate straight into the message box.
+  ///
+  /// Recognition runs on the device, and the text lands in the field rather
+  /// than being sent, so a misheard word is caught before the candidate sees
+  /// it.
+  Future<void> _toggleDictation() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    final available = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          if (mounted) setState(() => _listening = false);
+        }
+      },
+      onError: (_) {
+        if (mounted) setState(() => _listening = false);
+      },
+    );
+    if (!available) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Dictation needs microphone and speech permission.'),
+          ),
+        );
+      }
+      return;
+    }
+    final existing = _controller.text.trimRight();
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (result) {
+        final spoken = result.recognizedWords;
+        if (spoken.isEmpty) return;
+        _controller.text = existing.isEmpty ? spoken : '$existing $spoken';
+        _controller.selection =
+            TextSelection.collapsed(offset: _controller.text.length);
+        setState(() {});
+      },
+      listenOptions: stt.SpeechListenOptions(partialResults: true),
+    );
+  }
+
+  /// Ask the AI for a first draft from a rough brief.
+  ///
+  /// The draft is written into the box for editing — nothing is sent from
+  /// here, and it is kept to one segment so a message never splits.
+  Future<void> _draftWithAi() async {
+    final briefController = TextEditingController();
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Draft with AI'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Describe the role or the reason for reaching out. The draft '
+              'appears in the message box for you to edit before sending.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: briefController,
+              maxLines: 4,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText:
+                    'e.g. Senior Java developer, remote, \$120-140k. Ask if '
+                    'they are open and free this week.',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Draft'),
+          ),
+        ],
+      ),
+    );
+    final brief = briefController.text.trim();
+    if (go != true || brief.isEmpty) return;
+
+    setState(() => _drafting = true);
+    try {
+      final res = await ApiClient.instance.post('/ai-calls/compose', body: {
+        'context': brief,
+        'maxChars': 140,
+      }) as Map<String, dynamic>;
+      final text = (res['text'] as String?)?.trim() ?? '';
+      if (text.isNotEmpty && mounted) {
+        _controller.text = text;
+        _controller.selection =
+            TextSelection.collapsed(offset: _controller.text.length);
+      }
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not draft: $err')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _drafting = false);
+    }
+  }
+
   Future<void> _send() async {
     final body = _controller.text.trim();
     if (body.isEmpty || _sending) return;
@@ -290,6 +423,23 @@ class _SmsThreadScreenState extends State<SmsThreadScreen> {
       appBar: AppBar(
         title: Text(widget.phoneNumber),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.chat, color: Color(0xFF25D366)),
+            tooltip: 'Open in WhatsApp',
+            onPressed: () async {
+              // A hand-off, not an integration: the reply lands in WhatsApp,
+              // not here, so say so rather than letting it surprise anyone.
+              final opened = await WhatsAppService.open(
+                widget.phoneNumber,
+                message: _controller.text.trim(),
+              );
+              if (!opened && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('WhatsApp is not installed.')),
+                );
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.call, color: Color(0xFF059669)),
             tooltip: 'Call ${widget.phoneNumber}',
@@ -372,10 +522,35 @@ class _SmsThreadScreenState extends State<SmsThreadScreen> {
                       controller: _controller,
                       minLines: 1,
                       maxLines: 4,
-                      decoration: const InputDecoration(hintText: 'Type a message…'),
+                      decoration: InputDecoration(
+                        hintText: _listening ? 'Listening…' : 'Type a message…',
+                        // One segment is 160 characters and the opt-out line
+                        // eats into it, so show the cost of rambling.
+                        counterText: _controller.text.isEmpty
+                            ? null
+                            : '${_controller.text.length}/160',
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: _listening ? 'Stop dictating' : 'Dictate',
+                    onPressed: _sending ? null : _toggleDictation,
+                    icon: Icon(_listening ? Icons.stop_circle : Icons.mic_none),
+                    color: _listening ? const Color(0xFFDC2626) : null,
+                  ),
+                  IconButton(
+                    tooltip: 'Draft with AI',
+                    onPressed: _sending || _drafting ? null : _draftWithAi,
+                    icon: _drafting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome_outlined),
+                  ),
+                  const SizedBox(width: 4),
                   IconButton.filled(
                     onPressed: _sending ? null : _send,
                     icon: _sending

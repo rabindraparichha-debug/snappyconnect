@@ -41,6 +41,10 @@ class User {
         status: json['status'] as String? ?? 'active',
       );
 
+  /// Tenant-level administrator or above. The platform operator outranks a
+  /// tenant admin, so an exact `role == 'admin'` test would exclude them.
+  bool get isAdmin => role == 'admin' || role == 'super_admin';
+
   /// Regions the user can work in — falls back to the one implied by provider.
   List<String> get allowedRegions {
     if (regions.isNotEmpty) return regions;

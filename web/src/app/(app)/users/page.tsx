@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, getStoredUser } from '@/lib/api';
-import type { CallingProvider, Paginated, Region, User } from '@/lib/types';
+import type { CallingProvider, Paginated, Region, Role, User } from '@/lib/types';
 import { PROVIDER_LABELS, REGION_HINTS, REGION_LABELS, REGIONS } from '@/lib/types';
 import { Badge, Button, Card, EmptyState, Input, Label, Modal, Select, Spinner } from '@/components/ui';
 
@@ -12,7 +12,7 @@ interface UserForm {
   password: string;
   mobileNumber: string;
   country: string;
-  role: 'admin' | 'user';
+  role: Role;
   provider: '' | CallingProvider;
   telnyxCredentialId: string;
   ivrDigit: string;
@@ -434,8 +434,15 @@ export default function UsersPage() {
             <Label>Role</Label>
             <Select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value as 'admin' | 'user' })}
+              // The platform operator's role is not a tenant-level setting, so
+              // it is shown but locked here — the alternative is that saving an
+              // otherwise unrelated edit silently demotes them.
+              disabled={form.role === 'super_admin'}
+              onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
             >
+              {form.role === 'super_admin' && (
+                <option value="super_admin">Platform operator</option>
+              )}
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </Select>

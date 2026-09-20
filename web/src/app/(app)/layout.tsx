@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, clearSession, getStoredUser, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
+import { isAdmin, isPlatformOperator } from '@/lib/types';
 import { Logo } from '@/components/Logo';
 import { DialerPanel } from '@/components/DialerPanel';
 import { TelnyxIncoming } from '@/components/TelnyxIncoming';
@@ -12,6 +13,8 @@ import { cn } from '@/components/ui';
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: HomeIcon, adminOnly: false },
+  { href: '/company', label: 'Company', icon: BuildingIcon, adminOnly: true },
+  { href: '/tenants', label: 'Customers', icon: BuildingIcon, adminOnly: true, platformOnly: true },
   { href: '/history', label: 'Call History', icon: ClockIcon, adminOnly: false },
   { href: '/contacts', label: 'Contacts', icon: BookIcon, adminOnly: false },
   { href: '/lists', label: 'Contact Lists', icon: ListIcon, adminOnly: false },
@@ -26,7 +29,10 @@ const NAV = [
   { href: '/numbers', label: 'Phone Numbers', icon: PhoneIcon, adminOnly: true },
   { href: '/recordings', label: 'Recordings', icon: MicIcon, adminOnly: true },
   { href: '/audit', label: 'Audit Log', icon: ShieldIcon, adminOnly: true },
-  { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true },
+  // Provider credentials for the shared Telnyx account, Asterisk box and
+  // Dinstar gateway: the API restricts these to the platform operator, so
+  // showing the link to a tenant admin would only lead to a 403.
+  { href: '/settings', label: 'Settings', icon: CogIcon, adminOnly: true, platformOnly: true },
   { href: '/apps', label: 'Get the Apps', icon: DownloadIcon, adminOnly: false },
   { href: '/profile', label: 'Profile', icon: UserIcon, adminOnly: false },
 ];
@@ -38,7 +44,13 @@ const NAV = [
 function NavLinks({ role, pathname }: { role?: string; pathname: string }) {
   return (
     <nav className="flex-1 space-y-1 px-3 py-4">
-      {NAV.filter((item) => !item.adminOnly || role === 'admin').map((item) => {
+      {NAV.filter(
+        (item) =>
+          // Platform operator outranks a tenant admin, so an exact 'admin'
+          // match here would hide every admin link from them.
+          (!item.adminOnly || isAdmin(role)) &&
+          (!('platformOnly' in item && item.platformOnly) || isPlatformOperator(role)),
+      ).map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
@@ -342,6 +354,14 @@ function SparkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+function BuildingIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 21h16.5M4.5 3h9a.75.75 0 01.75.75V21H3.75V3.75A.75.75 0 014.5 3zm9.75 6h5.25a.75.75 0 01.75.75V21h-6V9zM7.5 6.75h3m-3 3h3m-3 3h3m-3 3h3m6-3h1.5m-1.5 3h1.5" />
+    </svg>
+  );
+}
+
 function ShieldIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
