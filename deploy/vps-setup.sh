@@ -45,7 +45,10 @@ DATABASE_PORT=5432
 DATABASE_USER=snappy
 DATABASE_PASSWORD=$DB_PASSWORD
 DATABASE_NAME=snappyconnect
-DATABASE_SYNCHRONIZE=true
+# Schema changes go through migrations, run below after the build. synchronize
+# rewrites the live schema to match the entities on boot and will drop a column
+# to do it, which is not survivable now that tenants share these tables.
+DATABASE_SYNCHRONIZE=false
 JWT_SECRET=$JWT_SECRET
 JWT_EXPIRES_IN=1d
 SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
@@ -72,6 +75,14 @@ EOF
 cd $APP_DIR/backend
 npm ci --no-audit --no-fund
 npm run build
+
+# Apply pending schema changes before the service restarts onto the new build.
+# Migrations are forward-only in practice: once a second tenant exists, the
+# multi-tenancy migration cannot be reverted without losing data, so a failure
+# here must stop the deploy rather than let the API boot against a half-migrated
+# schema.
+echo "--- database migrations"
+npx typeorm migration:run -d dist/data-source.js
 
 echo "--- web"
 echo "NEXT_PUBLIC_API_URL=$PUBLIC_API_URL" > $APP_DIR/web/.env.local

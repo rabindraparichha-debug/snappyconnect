@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -9,7 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsString, Matches } from 'class-validator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role, TenantStatus } from '../common/enums';
@@ -21,6 +22,12 @@ import { TenantsService } from './tenants.service';
 class SetTenantStatusDto {
   @IsEnum(TenantStatus)
   status: TenantStatus;
+}
+
+class TenantNumberDto {
+  @IsString()
+  @Matches(/^\+[1-9]\d{6,14}$/, { message: 'phoneNumber must be in E.164 form, e.g. +13325551234' })
+  phoneNumber: string;
 }
 
 @ApiTags('tenants')
@@ -83,5 +90,21 @@ export class TenantsController {
   @Roles(Role.SUPER_ADMIN)
   setStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetTenantStatusDto) {
     return this.tenantsService.setStatus(id, dto.status);
+  }
+
+  /** Set a number on the shared Telnyx account aside for this tenant. */
+  @Post(':id/numbers')
+  @Roles(Role.SUPER_ADMIN)
+  reserveNumber(@Param('id', ParseUUIDPipe) id: string, @Body() dto: TenantNumberDto) {
+    return this.tenantsService.reserveNumber(id, dto.phoneNumber);
+  }
+
+  @Delete(':id/numbers/:phoneNumber')
+  @Roles(Role.SUPER_ADMIN)
+  releaseNumber(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('phoneNumber') phoneNumber: string,
+  ) {
+    return this.tenantsService.releaseNumber(id, phoneNumber);
   }
 }

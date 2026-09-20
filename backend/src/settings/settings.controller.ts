@@ -11,7 +11,10 @@ import { SettingsService } from './settings.service';
 @ApiTags('Settings')
 @ApiBearerAuth()
 @Controller('settings')
-@Roles(Role.ADMIN)
+// Platform operator only: these namespaces hold the credentials for the shared
+// Telnyx account, Asterisk box and Dinstar gateway. A tenant administrator
+// editing them would be changing every other customer's calling.
+@Roles(Role.SUPER_ADMIN)
 export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,

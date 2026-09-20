@@ -11,6 +11,7 @@ import { Region, Role, UserStatus } from '../common/enums';
 import { TenantContext } from '../common/tenant-context';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
 import { SipPoolService } from '../providers/sip-pool.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { AssignProviderDto } from './dto/assign-provider.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -26,6 +27,7 @@ export class UsersService {
     private readonly usersRepo: Repository<User>,
     private readonly sipPool: SipPoolService,
     private readonly tenantContext: TenantContext,
+    private readonly tenants: TenantsService,
   ) {}
 
   /**
@@ -86,6 +88,11 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto): Promise<User> {
+    // Requires a tenant in scope: a user has to belong to one, and a super-admin
+    // creating an account has to say which via the X-Tenant-Id header rather
+    // than have one guessed for them.
+    await this.tenants.assertSeatAvailable(this.tenantContext.requireTenantId());
+
     // Email is unique platform-wide, so the check has to look past the current
     // tenant — otherwise this reports "available" and the insert then fails on
     // the unique index with a 500 instead of a clean conflict.
@@ -236,6 +243,11 @@ export class UsersService {
 
   async setStatus(id: string, status: UserStatus): Promise<User> {
     const user = await this.findById(id);
+    // Reactivating consumes a seat just as creating does, or the limit could be
+    // walked past by deactivating and re-enabling accounts.
+    if (status === UserStatus.ACTIVE && user.status !== UserStatus.ACTIVE) {
+      await this.tenants.assertSeatAvailable(user.tenantId);
+    }
     user.status = status;
     return this.usersRepo.save(user);
   }

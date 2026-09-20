@@ -58,6 +58,16 @@ export class Tenant {
   @Column({ type: 'simple-array', default: '' })
   regions: string[];
 
+  /**
+   * Numbers on the shared Telnyx account set aside for this tenant. When set,
+   * only these may be handed to its recruiters — without it every tenant would
+   * be offered every unassigned number on the account, including ones bought
+   * for somebody else. Empty means "any unassigned number", which is how the
+   * platform's own tenant behaves.
+   */
+  @Column({ type: 'simple-array', default: '' })
+  reservedNumbers: string[];
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

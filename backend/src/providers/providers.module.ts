@@ -5,6 +5,7 @@ import { CallLog } from '../calls/call-log.entity';
 import { CallRequest } from '../calls/call-request.entity';
 import { User } from '../users/user.entity';
 import { SettingsModule } from '../settings/settings.module';
+import { TenantsModule } from '../tenants/tenants.module';
 import { AsteriskAmiService } from './asterisk-ami.service';
 import { AsteriskCdrService } from './asterisk-cdr.service';
 import { AsteriskProvider } from './asterisk.provider';
@@ -19,7 +20,12 @@ import { TelnyxProvisioningService } from './telnyx-provisioning.service';
 import { TelnyxProvider } from './telnyx.provider';
 
 @Module({
-  imports: [SettingsModule, TypeOrmModule.forFeature([CallLog, CallRequest, User]), TenantOrmModule.forFeature([CallLog, CallRequest, User])],
+  imports: [
+    SettingsModule,
+    TenantsModule,
+    TypeOrmModule.forFeature([CallLog, CallRequest, User]),
+    TenantOrmModule.forFeature([CallLog, CallRequest, User]),
+  ],
   controllers: [NumbersController],
   providers: [
     ProvidersService,

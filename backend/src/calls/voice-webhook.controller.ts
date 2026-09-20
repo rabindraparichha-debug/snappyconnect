@@ -6,6 +6,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { DEFAULT_GREETING } from '../providers/numbers.controller';
 import { TelnyxApiService } from '../providers/telnyx-api.service';
 import { SettingsService } from '../settings/settings.service';
+import { Tenant } from '../tenants/tenant.entity';
 import { User } from '../users/user.entity';
 import { VoicemailsService } from '../voicemails/voicemails.service';
 
@@ -58,16 +59,14 @@ export class VoiceWebhookController {
   constructor(
     private readonly telnyx: TelnyxApiService,
     private readonly settings: SettingsService,
-    // Deliberately the unscoped repository. Telnyx calls this endpoint with no
-    // credentials of ours, so there is no signed-in user to take a tenant from
-    // and the lookup has to span every tenant to find the number's owner.
-    //
-    // TODO(multi-tenancy): once numbers are provisioned per tenant, resolve the
-    // tenant from the called number and run the rest of the handler inside it.
-    // Until then this path still assumes one shared inbound number, so inbound
-    // routing is not tenant-aware.
+    // Deliberately the unscoped repositories. Telnyx calls this endpoint with
+    // no credentials of ours, so there is no signed-in user to take a tenant
+    // from: the lookup has to span every tenant to find the dialled number's
+    // owner, and only then is the tenant known (see resolveTenantId).
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    @InjectRepository(Tenant)
+    private readonly tenantsRepo: Repository<Tenant>,
     private readonly voicemails: VoicemailsService,
   ) {}
 
@@ -96,7 +95,7 @@ export class VoiceWebhookController {
           break;
 
         case 'call.answered':
-          if (isInbound) await this.playMenu(callControlId);
+          if (isInbound) await this.playMenu(callControlId, await this.resolveTenantId(payload?.to));
           break;
 
         // A recruiter picked up — the transfer succeeded, so no voicemail.
@@ -149,11 +148,15 @@ export class VoiceWebhookController {
 
         case 'call.gather.ended': {
           const digit: string = payload?.digits ?? '';
+          // The menu the caller just heard was built for the tenant that owns
+          // the number they dialled, so their digit has to be resolved against
+          // the same one.
+          const tenantId = await this.resolveTenantId(payload?.to);
           // No digits means the caller waited — that is the operator request.
           if (!digit) {
-            await this.transferToOperator(callControlId, payload?.to);
+            await this.transferToOperator(callControlId, payload?.to, tenantId);
           } else {
-            await this.routeDigit(callControlId, digit, payload?.to);
+            await this.routeDigit(callControlId, digit, payload?.to, tenantId);
           }
           break;
         }
@@ -167,9 +170,9 @@ export class VoiceWebhookController {
     return { received: true };
   }
 
-  private async playMenu(callControlId: string): Promise<void> {
+  private async playMenu(callControlId: string, tenantId: string | null): Promise<void> {
     const [recruiters, cfg] = await Promise.all([
-      this.recruitersByDigit(),
+      this.recruitersByDigit(tenantId),
       this.settings.getProviderSettings('telnyx'),
     ]);
 
@@ -187,7 +190,7 @@ export class VoiceWebhookController {
     if (recruiters.size === 0) {
       // Nobody has a digit — go straight to whoever answers the main line.
       await this.telnyx.speak(callControlId, template.replace('{options}', '').trim());
-      await this.transferToOperator(callControlId);
+      await this.transferToOperator(callControlId, undefined, tenantId);
       return;
     }
     await this.telnyx.gatherDigits(callControlId, prompt, [...recruiters.keys()].join(''));
@@ -197,15 +200,22 @@ export class VoiceWebhookController {
    * Nobody pressed a digit (or no extensions exist): ring the operator. Falls
    * back to the first extension so a caller is never dropped in silence.
    */
-  private async transferToOperator(callControlId: string, boardNumber?: string): Promise<void> {
+  private async transferToOperator(
+    callControlId: string,
+    boardNumber?: string,
+    tenantId?: string | null,
+  ): Promise<void> {
     const cfg = await this.settings.getProviderSettings('telnyx');
     let operator: User | null = null;
 
     if (cfg.operatorUserId) {
       operator = await this.usersRepo.findOne({ where: { id: cfg.operatorUserId } });
+      // The configured operator is a single platform-wide setting. Ringing them
+      // for a different customer's call would hand that call to a stranger.
+      if (operator && tenantId && operator.tenantId !== tenantId) operator = null;
     }
     if (!operator) {
-      const recruiters = await this.recruitersByDigit();
+      const recruiters = await this.recruitersByDigit(tenantId ?? null);
       operator = [...recruiters.values()][0] ?? null;
     }
 
@@ -229,8 +239,13 @@ export class VoiceWebhookController {
     );
   }
 
-  private async routeDigit(callControlId: string, digit: string, boardNumber?: string) {
-    const recruiters = await this.recruitersByDigit();
+  private async routeDigit(
+    callControlId: string,
+    digit: string,
+    boardNumber?: string,
+    tenantId?: string | null,
+  ) {
+    const recruiters = await this.recruitersByDigit(tenantId ?? null);
     const target = recruiters.get(digit);
     if (!target) {
       await this.telnyx.speak(callControlId, 'That extension is unavailable. Goodbye.');
@@ -268,9 +283,44 @@ export class VoiceWebhookController {
     await this.telnyx.recordVoicemail(callControlId, greeting);
   }
 
-  /** Users with a menu digit assigned, keyed by that digit. */
-  private async recruitersByDigit(): Promise<Map<string, User>> {
-    const users = await this.usersRepo.find({ where: { status: 'active' as any } });
+  /**
+   * Which tenant owns the number that was called.
+   *
+   * Tried in order: the recruiter whose direct line it is, then the tenant that
+   * has it reserved (a main/board line), then the platform's own tenant — which
+   * is where a number that predates tenanted provisioning lives, so the single
+   * shared line keeps behaving as it did.
+   */
+  private async resolveTenantId(toNumber?: string): Promise<string | null> {
+    if (toNumber) {
+      const owner = await this.usersRepo
+        .createQueryBuilder('u')
+        .where(`u."providerConfig" ->> 'telnyxNumber' = :number`, { number: toNumber })
+        .getOne();
+      if (owner) return owner.tenantId;
+
+      const reserved = await this.tenantsRepo
+        .createQueryBuilder('t')
+        .where(':number = ANY(string_to_array(t."reservedNumbers", \',\'))', { number: toNumber })
+        .getOne();
+      if (reserved) return reserved.id;
+    }
+
+    const platform = await this.tenantsRepo.findOne({ where: { slug: 'default' } });
+    return platform?.id ?? null;
+  }
+
+  /**
+   * Users with a menu digit assigned, keyed by that digit — for one tenant
+   * only, or the whole platform would answer one customer's line with every
+   * other customer's recruiters on the menu.
+   */
+  private async recruitersByDigit(tenantId: string | null): Promise<Map<string, User>> {
+    const users = await this.usersRepo.find({
+      where: tenantId
+        ? { status: 'active' as any, tenantId }
+        : { status: 'active' as any },
+    });
     const map = new Map<string, User>();
     for (const user of users) {
       const digit = user.providerConfig?.ivrDigit;

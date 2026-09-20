@@ -8,6 +8,7 @@ import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { SettingsModule } from '../settings/settings.module';
+import { Tenant } from '../tenants/tenant.entity';
 import { SmsModule } from '../sms/sms.module';
 import { CallLog } from './call-log.entity';
 import { CallRequest } from './call-request.entity';
@@ -22,7 +23,7 @@ import { WebhooksController } from './webhooks.controller';
 @Module({
   imports: [
     VoicemailsModule,
-    TypeOrmModule.forFeature([CallLog, CallRequest, User]),
+    TypeOrmModule.forFeature([CallLog, CallRequest, User, Tenant]),
     TenantOrmModule.forFeature([CallLog, CallRequest, User]),
     ProvidersModule,
     SettingsModule,

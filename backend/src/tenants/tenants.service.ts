@@ -155,6 +155,57 @@ export class TenantsService {
     return this.tenantsRepo.save(tenant);
   }
 
+  /**
+   * Set aside a number on the shared Telnyx account for this tenant. Refuses a
+   * number another tenant already holds, so a reservation cannot be moved by
+   * accident while it is in use.
+   */
+  async reserveNumber(tenantId: string, phoneNumber: string): Promise<Tenant> {
+    const tenant = await this.findById(tenantId);
+    const holder = await this.tenantsRepo
+      .createQueryBuilder('t')
+      .where(':number = ANY(string_to_array(t."reservedNumbers", \',\'))', { number: phoneNumber })
+      .andWhere('t.id != :tenantId', { tenantId })
+      .getOne();
+    if (holder) {
+      throw new ConflictException(
+        `${phoneNumber} is already reserved for "${holder.slug}".`,
+      );
+    }
+
+    const reserved = tenant.reservedNumbers ?? [];
+    if (!reserved.includes(phoneNumber)) {
+      tenant.reservedNumbers = [...reserved, phoneNumber];
+      await this.tenantsRepo.save(tenant);
+      this.logger.log(`Reserved ${phoneNumber} for tenant ${tenant.slug}`);
+    }
+    return tenant;
+  }
+
+  /**
+   * Return a number to the shared pool. Refuses while a recruiter still has it
+   * as their direct line, since releasing it would leave their line reachable
+   * but re-assignable to another customer.
+   */
+  async releaseNumber(tenantId: string, phoneNumber: string): Promise<Tenant> {
+    const tenant = await this.findById(tenantId);
+    const inUse = await this.tenantContext.runUnscoped(() =>
+      this.usersRepo
+        .createQueryBuilder('u')
+        .where(`u."providerConfig" ->> 'telnyxNumber' = :number`, { number: phoneNumber })
+        .getOne(),
+    );
+    if (inUse) {
+      throw new BadRequestException(
+        `${phoneNumber} is still assigned to ${inUse.email}. Remove their direct line first.`,
+      );
+    }
+
+    tenant.reservedNumbers = (tenant.reservedNumbers ?? []).filter((n) => n !== phoneNumber);
+    await this.tenantsRepo.save(tenant);
+    return tenant;
+  }
+
   /** Active users against the purchased seat count. */
   async seatUsage(id: string): Promise<{ used: number; limit: number }> {
     const tenant = await this.findById(id);

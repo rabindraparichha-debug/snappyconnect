@@ -4,6 +4,8 @@ import { User } from '../users/user.entity';
 import { SettingsService } from '../settings/settings.service';
 import { TelnyxApiService } from './telnyx-api.service';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
+import { TenantContext } from '../common/tenant-context';
+import { TenantsService } from '../tenants/tenants.service';
 
 export interface DirectLine {
   phoneNumber: string;
@@ -26,6 +28,8 @@ export class TelnyxProvisioningService {
     private readonly settings: SettingsService,
     @InjectTenantRepository(User)
     private readonly usersRepo: Repository<User>,
+    private readonly tenantContext: TenantContext,
+    private readonly tenants: TenantsService,
   ) {}
 
   /**
@@ -44,7 +48,26 @@ export class TelnyxProvisioningService {
       );
     }
 
+    // An explicitly named number has to be one this tenant may actually use.
+    // Without this check the allocation rules are only enforced by the picker
+    // in the UI, and any tenant could claim another's number by asking for it.
+    if (phoneNumber) {
+      const allowed = await this.availableNumbers();
+      if (!allowed.includes(phoneNumber)) {
+        throw new BadRequestException(
+          `${phoneNumber} is not available to this account. It may already be assigned, parked, or reserved for another customer.`,
+        );
+      }
+    }
+
+    const tenantId = this.tenantContext.requireTenantId();
     const number = phoneNumber ?? (await this.telnyx.purchaseNumber(areaCode));
+
+    // A number bought while acting for a tenant belongs to that tenant, so it
+    // is reserved immediately rather than falling back into the shared pool.
+    if (!phoneNumber) {
+      await this.tenants.reserveNumber(tenantId, number);
+    }
     const safeName = user.email.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
     const connection = await this.getOrCreateConnection(`snappy-${safeName}`);
     const credential = await this.telnyx.createTelephonyCredential(
@@ -118,15 +141,23 @@ export class TelnyxProvisioningService {
   }
 
   /**
-   * Numbers on the account that are not yet assigned to any recruiter.
+   * Numbers this tenant may hand to a recruiter: on the account, reserved for
+   * the tenant, not already assigned, and not parked.
+   *
+   * `taken` is deliberately computed across every tenant. The Telnyx account is
+   * shared, so a number assigned to another customer's recruiter is not free —
+   * scoped to one tenant this would offer, and then reassign, a number that is
+   * already ringing somebody else's phone.
+   *
    * Parked numbers (e.g. spam-flagged, awaiting reputation clearing) are
    * excluded so they can never be handed to a new hire by accident.
    */
   async availableNumbers(): Promise<string[]> {
-    const [numbers, users, cfg] = await Promise.all([
+    const [numbers, users, cfg, tenant] = await Promise.all([
       this.telnyx.listNumbers(),
-      this.usersRepo.find(),
+      this.tenantContext.runUnscoped(() => this.usersRepo.find()),
       this.settings.getProviderSettings('telnyx'),
+      this.tenants.findById(this.tenantContext.requireTenantId()),
     ]);
     const taken = new Set(
       users.map((u) => u.providerConfig?.telnyxNumber).filter(Boolean) as string[],
@@ -142,8 +173,11 @@ export class TelnyxProvisioningService {
         .map((n) => String(n).trim())
         .filter(Boolean),
     );
+    const reserved = tenant.reservedNumbers ?? [];
+
     return numbers
       .map((n) => n.phoneNumber)
-      .filter((n) => !taken.has(n) && !parked.has(n));
+      .filter((n) => !taken.has(n) && !parked.has(n))
+      .filter((n) => reserved.length === 0 || reserved.includes(n));
   }
 }

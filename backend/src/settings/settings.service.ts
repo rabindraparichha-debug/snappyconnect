@@ -32,32 +32,33 @@ export class SettingsService {
   }
 
   /**
-   * Decrypted settings object for internal (provider) use.
+   * Decrypted settings for internal (provider) use.
    *
-   * Requires a tenant in scope. Provider settings hold API keys and the numbers
-   * calls are billed against, so resolving them without a tenant would pick an
-   * arbitrary customer's credentials — background and webhook callers must
-   * name the tenant via `getProviderSettingsForTenant`.
+   * Every namespace here is a credential for infrastructure the platform owns
+   * and all tenants share — one Telnyx account, one UAE Asterisk box, one
+   * Dinstar gateway — so these are held against the platform's own ("default")
+   * tenant rather than per customer. What *is* per tenant is which numbers and
+   * lines out of that shared account each one holds.
+   *
+   * Resolving platform-level also means background work that runs at boot, with
+   * no tenant in scope, reads the same values a request does.
    */
   async getProviderSettings(key: ProviderSettingKey): Promise<Record<string, any>> {
-    this.tenantContext.requireTenantId();
-    const row = await this.settingsRepo.findOne({ where: { key } });
-    return this.decode(row?.value);
+    return this.getPlatformProviderSettings(key);
   }
 
-  /**
-   * Settings for infrastructure shared by every tenant — the UAE Asterisk box
-   * and its AMI credentials — which are held against the platform's own
-   * ("default") tenant. Used by background services that run at boot, outside
-   * any request, and so have no tenant to inherit.
-   */
   async getPlatformProviderSettings(key: ProviderSettingKey): Promise<Record<string, any>> {
     return this.tenantContext.runUnscoped(async () => {
-      const platform = await this.tenantsRepo.findOne({ where: { slug: 'default' } });
-      if (!platform) return {};
-      const row = await this.settingsRepo.findOne({ where: { tenantId: platform.id, key } });
+      const tenantId = await this.platformTenantId();
+      if (!tenantId) return {};
+      const row = await this.settingsRepo.findOne({ where: { tenantId, key } });
       return this.decode(row?.value);
     });
+  }
+
+  private async platformTenantId(): Promise<string | null> {
+    const platform = await this.tenantsRepo.findOne({ where: { slug: 'default' } });
+    return platform?.id ?? null;
   }
 
   /**
@@ -131,13 +132,22 @@ export class SettingsService {
     }
 
     const encrypted = encryptString(JSON.stringify(next), this.encryptionKey);
-    const row = await this.settingsRepo.findOne({ where: { key } });
-    if (row) {
-      row.value = encrypted;
-      await this.settingsRepo.save(row);
-    } else {
-      await this.settingsRepo.save(this.settingsRepo.create({ key, value: encrypted }));
-    }
+    // Written against the platform tenant, to match where they are read from.
+    await this.tenantContext.runUnscoped(async () => {
+      const tenantId = await this.platformTenantId();
+      if (!tenantId) {
+        throw new BadRequestException(
+          'The platform tenant is missing, so provider settings cannot be saved.',
+        );
+      }
+      const row = await this.settingsRepo.findOne({ where: { tenantId, key } });
+      if (row) {
+        row.value = encrypted;
+        await this.settingsRepo.save(row);
+      } else {
+        await this.settingsRepo.save(this.settingsRepo.create({ tenantId, key, value: encrypted }));
+      }
+    });
     return this.getMaskedProviderSettings(key as ProviderSettingKey);
   }
 }
