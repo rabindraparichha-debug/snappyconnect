@@ -6,6 +6,17 @@ export enum Role {
   USER = 'user',
 }
 
+/**
+ * Tenant-level administrator or above.
+ *
+ * Use this rather than comparing against `Role.ADMIN` directly: the platform
+ * operator outranks a tenant admin, so an exact match silently demotes them to
+ * a plain user and hides records they are entitled to see.
+ */
+export function isAdminRole(role: Role | string | undefined | null): boolean {
+  return role === Role.ADMIN || role === Role.SUPER_ADMIN;
+}
+
 export enum TenantStatus {
   ACTIVE = 'active',
   /** Billing lapsed or manually paused: users can sign in but cannot place calls. */

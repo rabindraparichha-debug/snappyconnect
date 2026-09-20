@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { CallStatus, Role, UserStatus } from '../common/enums';
+import { CallStatus, Role, UserStatus, isAdminRole } from '../common/enums';
 import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
@@ -26,7 +26,7 @@ export class DashboardService {
         .createQueryBuilder('call')
         .where('call.createdAt >= CURRENT_DATE');
       // Non-admins see stats for their own calls only.
-      if (user.role !== Role.ADMIN) {
+      if (!isAdminRole(user.role)) {
         qb.andWhere('call.userId = :id', { id: user.id });
       }
       return qb;
@@ -63,13 +63,13 @@ export class DashboardService {
       .where('(call.phoneNumber ILIKE :term OR call.contactName ILIKE :term OR call.notes ILIKE :term)', { term })
       .orderBy('call.createdAt', 'DESC')
       .take(10);
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       callQb.andWhere('call.userId = :uid', { uid: user.id });
     }
     const calls = await callQb.getMany();
 
     let users: User[] = [];
-    if (user.role === Role.ADMIN) {
+    if (isAdminRole(user.role)) {
       users = await this.usersRepo
         .createQueryBuilder('user')
         .where('(user.name ILIKE :term OR user.email ILIKE :term)', { term })
@@ -87,7 +87,7 @@ export class DashboardService {
       .groupBy('call.phoneNumber')
       .orderBy('MAX(call.createdAt)', 'DESC')
       .limit(5);
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       contactQb.andWhere('call.userId = :uid', { uid: user.id });
     }
     const contacts = await contactQb.getRawMany();

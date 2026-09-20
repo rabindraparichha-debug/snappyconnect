@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { User } from '../users/user.entity';
@@ -41,7 +41,7 @@ export class ScheduledCallsService {
       .leftJoinAndSelect('sc.user', 'user')
       .orderBy('sc.scheduledAt', 'ASC');
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('sc.userId = :uid', { uid: user.id });
     }
     if (from) qb.andWhere('sc.scheduledAt >= :from', { from: new Date(from) });
@@ -59,7 +59,7 @@ export class ScheduledCallsService {
       .orderBy('sc.scheduledAt', 'ASC')
       .take(limit);
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('sc.userId = :uid', { uid: user.id });
     }
     return qb.getMany();
@@ -110,7 +110,7 @@ export class ScheduledCallsService {
   private async getOwn(user: User, id: string): Promise<ScheduledCall> {
     const item = await this.repo.findOne({ where: { id } });
     if (!item) throw new NotFoundException('Scheduled call not found');
-    if (user.role !== Role.ADMIN && item.userId !== user.id) {
+    if (!isAdminRole(user.role) && item.userId !== user.id) {
       throw new ForbiddenException('Not your scheduled call');
     }
     return item;

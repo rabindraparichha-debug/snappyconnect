@@ -5,21 +5,21 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { readFile, unlink, writeFile } from 'fs/promises';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { RecordingsService } from '../calls/recordings.service';
 import { AiCallsService } from '../ai-calls/ai-calls.service';
 import { User } from '../users/user.entity';
 import { VoiceRequest } from './voice-request.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class VoiceRequestsService {
   private readonly logger = new Logger(VoiceRequestsService.name);
 
   constructor(
-    @InjectRepository(VoiceRequest)
+    @InjectTenantRepository(VoiceRequest)
     private readonly repo: Repository<VoiceRequest>,
     private readonly recordings: RecordingsService,
     private readonly aiCalls: AiCallsService,
@@ -56,7 +56,7 @@ export class VoiceRequestsService {
   }
 
   async list(user: User): Promise<VoiceRequest[]> {
-    const where = user.role === Role.ADMIN ? {} : { userId: user.id };
+    const where = isAdminRole(user.role) ? {} : { userId: user.id };
     return this.repo.find({ where, order: { createdAt: 'DESC' }, take: 100 });
   }
 
@@ -90,7 +90,7 @@ export class VoiceRequestsService {
    * someone's voice should not linger on disk. */
   async remove(user: User, id: string): Promise<{ deleted: true }> {
     const request = await this.find(id);
-    if (user.role !== Role.ADMIN && request.userId !== user.id) {
+    if (!isAdminRole(user.role) && request.userId !== user.id) {
       throw new ForbiddenException('That request belongs to someone else.');
     }
     await unlink(this.recordings.localPath(request.sampleFilename)).catch((err) =>

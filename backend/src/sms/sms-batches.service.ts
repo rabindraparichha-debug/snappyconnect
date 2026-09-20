@@ -8,7 +8,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { In, LessThanOrEqual, Repository } from 'typeorm';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { User } from '../users/user.entity';
 import { SmsBatch, SmsBatchItem, SmsBatchStatus } from './sms-batch.entity';
 import { SmsService } from './sms.service';
@@ -187,7 +187,7 @@ export class SmsBatchesService implements OnModuleInit, OnModuleDestroy {
   // ---------- listing / cancel ----------
 
   async list(user: User) {
-    const where = user.role === Role.ADMIN ? {} : { userId: user.id };
+    const where = isAdminRole(user.role) ? {} : { userId: user.id };
     const batches = await this.batchesRepo.find({
       where,
       order: { createdAt: 'DESC' },
@@ -202,7 +202,7 @@ export class SmsBatchesService implements OnModuleInit, OnModuleDestroy {
   async cancel(user: User, id: string) {
     const batch = await this.batchesRepo.findOne({ where: { id } });
     if (!batch) throw new NotFoundException('Batch not found');
-    if (user.role !== Role.ADMIN && batch.userId !== user.id) {
+    if (!isAdminRole(user.role) && batch.userId !== user.id) {
       throw new ForbiddenException('You can only cancel your own batches');
     }
     if (batch.status === SmsBatchStatus.COMPLETED) {

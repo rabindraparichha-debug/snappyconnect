@@ -9,14 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
-import {
-  CallDirection,
-  CallSource,
-  CallStatus,
-  CallingProvider,
-  Region,
-  Role,
-} from '../common/enums';
+import { CallDirection, CallSource, CallStatus, CallingProvider, Region, Role, isAdminRole } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { DncService } from '../dnc/dnc.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -288,7 +281,7 @@ export class AiCallsService {
       .filter((c) => {
         const log = byPlatformId.get(c.call_id);
         if (!log) return false;
-        return user.role === Role.ADMIN || log.userId === user.id;
+        return isAdminRole(user.role) || log.userId === user.id;
       })
       .map((c) => ({
         platformCallId: c.call_id,
@@ -331,7 +324,7 @@ export class AiCallsService {
 
   private async assertOwnLiveCall(user: User, platformCallId: string): Promise<void> {
     const log = await this.findByPlatformId(platformCallId);
-    if (!log || (user.role !== Role.ADMIN && log.userId !== user.id)) {
+    if (!log || (!isAdminRole(user.role) && log.userId !== user.id)) {
       throw new ForbiddenException('Not your call.');
     }
   }

@@ -21,6 +21,11 @@ export class Voicemail {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   /** The recruiter the caller was trying to reach. */
   @Index()
   @Column({ type: 'uuid', nullable: true })

@@ -11,7 +11,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { User } from '../users/user.entity';
 import { CreateCallScriptDto, UpdateCallScriptDto } from './dto/call-script.dto';
 import { ScriptsService } from './scripts.service';
@@ -24,7 +24,7 @@ export class ScriptsController {
 
   @Get()
   findAll(@CurrentUser() user: User, @Query('all') all?: string) {
-    const includeInactive = user.role === Role.ADMIN && all === 'true';
+    const includeInactive = isAdminRole(user.role) && all === 'true';
     return this.service.findAll(includeInactive);
   }
 

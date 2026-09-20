@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Not, Repository } from 'typeorm';
-import { CallingProvider, Region, Role, SmsDirection, SmsStatus } from '../common/enums';
+import { In, Not, Repository } from 'typeorm';
+import { CallingProvider, Region, Role, SmsDirection, SmsStatus, isAdminRole } from '../common/enums';
 import { toUsE164 } from '../common/phone.util';
 import { ActivityService } from '../activity/activity.service';
 import { ActivityType } from '../activity/activity.entity';
@@ -15,6 +15,8 @@ import { DncService } from '../dnc/dnc.service';
 import { SettingsService } from '../settings/settings.service';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { SmsLog } from './sms-log.entity';
+import { Tenant } from '../tenants/tenant.entity';
+import { TenantContext } from '../common/tenant-context';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
@@ -30,7 +32,36 @@ export class SmsService {
     private readonly webhooksService: WebhooksService,
     private readonly dncService: DncService,
     private readonly settings: SettingsService,
+    private readonly tenantContext: TenantContext,
   ) {}
+
+  /**
+   * Which tenant owns the number a message arrived on: the recruiter whose
+   * direct line it is, then the tenant that has it reserved, then the
+   * platform's own tenant so a number predating tenanted provisioning keeps
+   * working. Mirrors the voice webhook, for the same reason — Telnyx calls us
+   * with no credentials of ours, so nothing else identifies the customer.
+   */
+  private async resolveTenantId(toNumber?: string): Promise<string | null> {
+    const manager = this.smsRepo.manager;
+    if (toNumber) {
+      const owner = await manager
+        .getRepository(User)
+        .createQueryBuilder('u')
+        .where(`u."providerConfig" ->> 'telnyxNumber' = :number`, { number: toNumber })
+        .getOne();
+      if (owner) return owner.tenantId;
+
+      const reserved = await manager
+        .getRepository(Tenant)
+        .createQueryBuilder('t')
+        .where(':number = ANY(string_to_array(t."reservedNumbers", \',\'))', { number: toNumber })
+        .getOne();
+      if (reserved) return reserved.id;
+    }
+    const platform = await manager.getRepository(Tenant).findOne({ where: { slug: 'default' } });
+    return platform?.id ?? null;
+  }
 
   async send(user: User, dto: SendSmsDto): Promise<SmsLog> {
     if (!this.canSendSms(user)) {
@@ -112,15 +143,54 @@ export class SmsService {
     if (!eventType?.startsWith('message.') || !payload) return;
 
     if (eventType === 'message.received') {
+      // Resolve the customer from the number that was texted, then do the rest
+      // inside their scope so the stored message, its activity and the
+      // notifications all land in the right account.
+      const toNumber = Array.isArray(payload.to)
+        ? toE164(payload.to[0]?.phone_number ?? '')
+        : toE164(payload.to?.phone_number ?? '');
+      const tenantId = await this.resolveTenantId(toNumber || undefined);
+      if (!tenantId) {
+        this.logger.warn(`Inbound SMS on ${toNumber || 'unknown number'} matched no tenant — dropped`);
+        return;
+      }
+      await this.tenantContext.run({ tenantId, crossTenant: false }, () =>
+        this.handleInbound(payload, tenantId),
+      );
+      return;
+    }
+
+    // Outbound lifecycle (message.sent / message.finalized): update by provider id.
+    if (!payload.id) return;
+    const log = await this.smsRepo.findOne({ where: { externalId: payload.id } });
+    if (!log || log.direction !== SmsDirection.OUTBOUND) return;
+    const to = Array.isArray(payload.to) ? payload.to[0] : payload.to;
+    const status: string | undefined = to?.status ?? payload.status;
+    if (status === 'delivered') log.status = SmsStatus.DELIVERED;
+    else if (['sending_failed', 'delivery_failed', 'failed'].includes(status ?? '')) {
+      log.status = SmsStatus.FAILED;
+      const errors = Array.isArray(payload.errors) ? payload.errors : [];
+      log.error =
+        errors.map((e: any) => e?.detail ?? e?.title).filter(Boolean).join('; ') ||
+        `Carrier reported: ${status}`;
+    }
+    await this.smsRepo.save(log);
+  }
+
+  /** The body of `message.received`, run with the owning tenant in scope. */
+  private async handleInbound(payload: any, tenantId: string): Promise<void> {
+    {
       const fromNumber = toE164(payload.from?.phone_number ?? '') || 'unknown';
 
       // Carrier-required opt-out handling: STOP (and friends) permanently
       // suppresses the number for messages and calls alike.
       const text: string = (payload.text ?? '').trim().toUpperCase();
       if (['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'].includes(text)) {
+        // The raw repository, so the tenant is applied by hand: the STOP is
+        // recorded against this customer's own administrator.
         const admins0 = await this.smsRepo.manager
           .getRepository(User)
-          .find({ where: { role: Role.ADMIN } });
+          .find({ where: { tenantId, role: In([Role.ADMIN, Role.SUPER_ADMIN]) } });
         if (admins0[0]) {
           await this.dncService
             .add(admins0[0], fromNumber, 'SMS opt-out (STOP reply)')
@@ -163,9 +233,11 @@ export class SmsService {
 
       // Notify the recruiter whose conversation this is, plus the admins —
       // otherwise a recruiter would never learn a candidate had replied.
+      // This customer's administrators only — every tenant's admins would
+      // otherwise be told a stranger's candidate had replied.
       const admins = await this.smsRepo.manager
         .getRepository(User)
-        .find({ where: { role: Role.ADMIN } });
+        .find({ where: { tenantId, role: In([Role.ADMIN, Role.SUPER_ADMIN]) } });
       const recipients = new Set(admins.map((admin) => admin.id));
       if (ownerId) recipients.add(ownerId);
       for (const recipientId of recipients) {
@@ -177,24 +249,7 @@ export class SmsService {
           sms.id,
         ).catch((err) => this.logger.warn('Failed to create SMS notification', err));
       }
-      return;
     }
-
-    // Outbound lifecycle (message.sent / message.finalized): update by provider id.
-    if (!payload.id) return;
-    const log = await this.smsRepo.findOne({ where: { externalId: payload.id } });
-    if (!log || log.direction !== SmsDirection.OUTBOUND) return;
-    const to = Array.isArray(payload.to) ? payload.to[0] : payload.to;
-    const status: string | undefined = to?.status ?? payload.status;
-    if (status === 'delivered') log.status = SmsStatus.DELIVERED;
-    else if (['sending_failed', 'delivery_failed', 'failed'].includes(status ?? '')) {
-      log.status = SmsStatus.FAILED;
-      const errors = Array.isArray(payload.errors) ? payload.errors : [];
-      log.error =
-        errors.map((e: any) => e?.detail ?? e?.title).filter(Boolean).join('; ') ||
-        `Carrier reported: ${status}`;
-    }
-    await this.smsRepo.save(log);
   }
 
   async findAll(user: User, page = 1, limit = 20) {
@@ -205,7 +260,7 @@ export class SmsService {
       .skip((page - 1) * limit)
       .take(limit);
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('sms.userId = :id', { id: user.id });
     }
 
@@ -328,12 +383,12 @@ export class SmsService {
 
   /** Whose messages a request may see: the user's own, or everyone's for admins. */
   private scopeFor(user: User): string | null {
-    return user.role === Role.ADMIN ? null : user.id;
+    return isAdminRole(user.role) ? null : user.id;
   }
 
   /** SMS runs on the USA (Telnyx) line, so USA access is what grants it. */
   private canSendSms(user: User): boolean {
-    if (user.role === Role.ADMIN) return true;
+    if (isAdminRole(user.role)) return true;
     if (user.regions?.includes(Region.USA)) return true;
     return user.provider === CallingProvider.TELNYX;
   }

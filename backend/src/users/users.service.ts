@@ -6,8 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
-import { Repository } from 'typeorm';
-import { Region, Role, UserStatus } from '../common/enums';
+import { In, Repository } from 'typeorm';
+import { Region, Role, UserStatus, isAdminRole } from '../common/enums';
 import { TenantContext } from '../common/tenant-context';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
 import { SipPoolService } from '../providers/sip-pool.service';
@@ -234,8 +234,13 @@ export class UsersService {
 
   async remove(id: string): Promise<void> {
     const user = await this.findById(id);
-    if (user.role === Role.ADMIN) {
-      const adminCount = await this.usersRepo.count({ where: { role: Role.ADMIN } });
+    if (isAdminRole(user.role)) {
+      // Counted within the tenant (the repository scopes it) and across both
+      // admin roles, so a tenant is never left with no one who can administer
+      // it.
+      const adminCount = await this.usersRepo.count({
+        where: { role: In([Role.ADMIN, Role.SUPER_ADMIN]) },
+      });
       if (adminCount <= 1) throw new BadRequestException('Cannot delete the last admin');
     }
     await this.usersRepo.remove(user);

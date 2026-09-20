@@ -24,6 +24,11 @@ export class VoiceRequest {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Owning tenant. */
+  @Index()
+  @Column({ type: 'uuid' })
+  tenantId: string;
+
   @Index()
   @Column({ type: 'uuid' })
   userId: string;

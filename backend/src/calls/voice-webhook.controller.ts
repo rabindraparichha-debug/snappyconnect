@@ -127,8 +127,13 @@ export class VoiceWebhookController {
           if (ownerId) {
             const url: string | undefined =
               payload?.recording_urls?.mp3 ?? payload?.public_recording_urls?.mp3;
-            if (url) {
+            // The message belongs to whichever tenant owns the mailbox it was
+            // left in. There is no tenant in scope here, so it is read off the
+            // recruiter rather than inferred.
+            const owner = await this.usersRepo.findOne({ where: { id: ownerId } });
+            if (url && owner) {
               await this.voicemails.record({
+                tenantId: owner.tenantId,
                 userId: ownerId,
                 fromNumber: payload?.from ?? 'Unknown',
                 sourceUrl: url,

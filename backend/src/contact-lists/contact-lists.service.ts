@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In, Repository } from 'typeorm';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { User } from '../users/user.entity';
 import {
   ContactItemStatus,
@@ -42,7 +42,7 @@ export class ContactListsService {
       .createQueryBuilder('list')
       .leftJoinAndSelect('list.owner', 'owner')
       .orderBy('list.createdAt', 'DESC');
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.where('list.ownerId = :uid', { uid: user.id });
     }
     const lists = await qb.getMany();
@@ -241,7 +241,7 @@ export class ContactListsService {
   private async getOwn(user: User, id: string): Promise<ContactList> {
     const list = await this.listsRepo.findOne({ where: { id } });
     if (!list) throw new NotFoundException('List not found');
-    if (user.role !== Role.ADMIN && list.ownerId !== user.id) {
+    if (!isAdminRole(user.role) && list.ownerId !== user.id) {
       throw new ForbiddenException('Not your list');
     }
     return list;

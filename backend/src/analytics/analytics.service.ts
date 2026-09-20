@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { CallLog } from '../calls/call-log.entity';
-import { CallDirection, CallStatus, Role } from '../common/enums';
+import { CallDirection, CallStatus, Role, isAdminRole } from '../common/enums';
 import { User } from '../users/user.entity';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { InjectTenantRepository } from '../common/tenant-orm.module';
@@ -169,7 +169,7 @@ export class AnalyticsService {
       .andWhere(`call.metadata ->> 'outcome' = 'VOICEMAIL'`)
       .orderBy('call.createdAt', 'DESC')
       .take(Math.min(limit, 200));
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('call.userId = :uid', { uid: user.id });
     }
     const rows = await qb.getMany();

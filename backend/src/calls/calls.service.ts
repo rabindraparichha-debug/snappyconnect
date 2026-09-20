@@ -5,16 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import {
-  CallDirection,
-  CallingProvider,
-  CallRequestStatus,
-  CallSource,
-  CallStatus,
-  Region,
-  REGION_PROVIDER,
-  Role,
-} from '../common/enums';
+import { CallDirection, CallRequestStatus, CallSource, CallStatus, CallingProvider, REGION_PROVIDER, Region, Role, isAdminRole } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { DncService } from '../dnc/dnc.service';
 import { RecordingsService } from './recordings.service';
@@ -178,7 +169,7 @@ export class CallsService {
   async updateLog(user: User, id: string, dto: UpdateCallLogDto): Promise<CallLog> {
     const log = await this.callLogsRepo.findOne({ where: { id } });
     if (!log) throw new NotFoundException('Call log not found');
-    if (user.role !== Role.ADMIN && log.userId !== user.id) {
+    if (!isAdminRole(user.role) && log.userId !== user.id) {
       throw new ForbiddenException('You can only update your own calls');
     }
     if (dto.status) log.status = dto.status;
@@ -216,7 +207,7 @@ export class CallsService {
 
   async bulkUpdate(user: User, dto: BulkUpdateCallsDto): Promise<{ updated: number }> {
     const qb = this.callLogsRepo.createQueryBuilder('c').whereInIds(dto.ids);
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('c.userId = :uid', { uid: user.id });
     }
     const logs = await qb.getMany();
@@ -284,7 +275,7 @@ export class CallsService {
       .orderBy('call.createdAt', 'DESC');
 
     // Non-admins only ever see their own history.
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('call.userId = :ownId', { ownId: user.id });
     } else if (query.userId) {
       qb.andWhere('call.userId = :userId', { userId: query.userId });
@@ -363,7 +354,7 @@ export class CallsService {
   private async getOwnRequest(user: User, id: string): Promise<CallRequest> {
     const request = await this.requestsRepo.findOne({ where: { id } });
     if (!request) throw new NotFoundException('Call request not found');
-    if (request.userId !== user.id && user.role !== Role.ADMIN) {
+    if (request.userId !== user.id && !isAdminRole(user.role)) {
       throw new ForbiddenException('Not your call request');
     }
     return request;
@@ -426,7 +417,7 @@ export class CallsService {
       .groupBy('call.phoneNumber')
       .orderBy('"lastCallAt"', 'DESC');
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('call.userId = :uid', { uid: user.id });
     }
     if (query.q) {
@@ -457,7 +448,7 @@ export class CallsService {
       .where('call.phoneNumber = :phone', { phone: phoneNumber })
       .orderBy('call.createdAt', 'DESC');
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('call.userId = :uid', { uid: user.id });
     }
     return qb.getMany();
@@ -474,7 +465,7 @@ export class CallsService {
       .orderBy('call.followUpDate', 'ASC')
       .take(limit);
 
-    if (user.role !== Role.ADMIN) {
+    if (!isAdminRole(user.role)) {
       qb.andWhere('call.userId = :uid', { uid: user.id });
     }
     return qb.getMany();

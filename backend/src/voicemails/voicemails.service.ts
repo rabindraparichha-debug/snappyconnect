@@ -1,18 +1,18 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { unlink } from 'fs/promises';
-import { Role } from '../common/enums';
+import { Role, isAdminRole } from '../common/enums';
 import { RecordingsService } from '../calls/recordings.service';
 import { User } from '../users/user.entity';
 import { Voicemail } from './voicemail.entity';
+import { InjectTenantRepository } from '../common/tenant-orm.module';
 
 @Injectable()
 export class VoicemailsService {
   private readonly logger = new Logger(VoicemailsService.name);
 
   constructor(
-    @InjectRepository(Voicemail)
+    @InjectTenantRepository(Voicemail)
     private readonly repo: Repository<Voicemail>,
     private readonly recordings: RecordingsService,
   ) {}
@@ -24,6 +24,12 @@ export class VoicemailsService {
    * recordings, and a voicemail that disappears is worse than none.
    */
   async record(params: {
+    /**
+     * Owning tenant, passed in explicitly: this is driven by the Telnyx
+     * webhook, which runs with no tenant in scope, so the row would otherwise
+     * be written without an owner.
+     */
+    tenantId: string;
     userId: string;
     fromNumber: string;
     sourceUrl: string;
@@ -36,6 +42,7 @@ export class VoicemailsService {
       this.logger.warn(`Voicemail audio could not be fetched for ${params.externalId}`);
     }
     const voicemail = this.repo.create({
+      tenantId: params.tenantId,
       userId: params.userId,
       fromNumber: params.fromNumber,
       // Fall back to the provider copy so the message is never lost outright.
@@ -48,12 +55,12 @@ export class VoicemailsService {
 
   /** A recruiter sees only their own messages; admins see everyone's. */
   async list(user: User): Promise<Voicemail[]> {
-    const where = user.role === Role.ADMIN ? {} : { userId: user.id };
+    const where = isAdminRole(user.role) ? {} : { userId: user.id };
     return this.repo.find({ where, order: { createdAt: 'DESC' }, take: 200 });
   }
 
   async unreadCount(user: User): Promise<number> {
-    const where = user.role === Role.ADMIN ? { read: false } : { userId: user.id, read: false };
+    const where = isAdminRole(user.role) ? { read: false } : { userId: user.id, read: false };
     return this.repo.count({ where });
   }
 
@@ -80,7 +87,7 @@ export class VoicemailsService {
   private async own(user: User, id: string): Promise<Voicemail> {
     const voicemail = await this.repo.findOne({ where: { id } });
     if (!voicemail) throw new NotFoundException('That voicemail no longer exists.');
-    if (user.role !== Role.ADMIN && voicemail.userId !== user.id) {
+    if (!isAdminRole(user.role) && voicemail.userId !== user.id) {
       throw new ForbiddenException('That voicemail belongs to another recruiter.');
     }
     return voicemail;
