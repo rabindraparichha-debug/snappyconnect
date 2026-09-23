@@ -100,6 +100,15 @@ export class VoiceRequestsService {
     return { deleted: true };
   }
 
+  /// Path to the submitted sample, so an admin can hear it before deciding.
+  async samplePath(user: User, id: string): Promise<string> {
+    const request = await this.find(id);
+    if (user.role !== Role.ADMIN && request.userId !== user.id) {
+      throw new ForbiddenException('That request belongs to someone else.');
+    }
+    return this.recordings.localPath(request.sampleFilename);
+  }
+
   private async find(id: string): Promise<VoiceRequest> {
     const request = await this.repo.findOne({ where: { id } });
     if (!request) throw new NotFoundException('That request no longer exists.');

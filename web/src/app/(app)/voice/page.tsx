@@ -31,6 +31,8 @@ export default function VoicePage() {
   const [requests, setRequests] = useState<VoiceRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [sampleUrl, setSampleUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +57,28 @@ export default function VoicePage() {
       setError(err instanceof Error ? err.message : `Could not ${action} that request`);
     } finally {
       setBusy(null);
+    }
+  }
+
+  /** Hear the submission before judging it. */
+  async function play(id: string) {
+    if (playing === id) {
+      setPlaying(null);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/voice-requests/${id}/sample`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('That sample is no longer available');
+      const blob = await res.blob();
+      setSampleUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(blob);
+      });
+      setPlaying(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not play the sample');
     }
   }
 
@@ -107,6 +131,9 @@ export default function VoicePage() {
                   </p>
                 </div>
                 <StatusChip status={r.status} />
+                <Button variant="secondary" onClick={() => play(r.id)}>
+                  {playing === r.id ? 'Stop' : 'Listen'}
+                </Button>
                 {isAdmin && r.status === 'pending' && (
                   <>
                     <Button
@@ -128,6 +155,9 @@ export default function VoicePage() {
                 <Button variant="ghost" disabled={busy === r.id} onClick={() => remove(r.id)}>
                   Delete
                 </Button>
+                {playing === r.id && sampleUrl && (
+                  <audio controls autoPlay className="mt-2 w-full" src={sampleUrl} />
+                )}
               </li>
             ))}
           </ul>
