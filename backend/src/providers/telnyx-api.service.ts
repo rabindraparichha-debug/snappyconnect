@@ -78,8 +78,12 @@ export class TelnyxApiService {
         ...(profileId
           ? { outbound: { outbound_voice_profile_id: String(profileId) } }
           : {}),
-        // Browsers register over WSS; encrypted media keeps Chrome happy.
-        webhook_event_url: undefined,
+        // Without this the backend never hears about calls on this line:
+        // no call logging, and no voicemail when it goes unanswered. The
+        // first connection provisioned this way was silently missing it.
+        webhook_event_url: `${
+          process.env.PUBLIC_API_URL ?? 'https://call.snappyhires.com/api/v1'
+        }/webhooks/telnyx`,
       },
     });
     return { id: String(data?.data?.id) };

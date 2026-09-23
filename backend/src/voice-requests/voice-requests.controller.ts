@@ -6,9 +6,12 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { existsSync } from 'fs';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -37,6 +40,25 @@ export class VoiceRequestsController {
     @Body() body: { name?: string },
   ) {
     return this.requests.submit(user, body?.name || `${user.name}'s voice`, file);
+  }
+
+  /**
+   * The submitted sample itself. Approving a voice without hearing it is
+   * approving blind, so this is what the review screen plays.
+   */
+  @Get(':id/sample')
+  async sample(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    const path = await this.requests.samplePath(user, id);
+    if (!existsSync(path)) {
+      res.status(404).json({ message: 'That sample is no longer available' });
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.sendFile(path);
   }
 
   @Roles(Role.ADMIN)
