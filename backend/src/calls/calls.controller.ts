@@ -31,6 +31,7 @@ import { InitiateCallDto } from './dto/initiate-call.dto';
 import { BulkUpdateCallsDto, LogCallDto, UpdateCallLogDto } from './dto/log-call.dto';
 import { QueryCallsDto } from './dto/query-calls.dto';
 import { SyncCallsDto } from './dto/sync-calls.dto';
+import { CallLimitsService } from './call-limits.service';
 import { RecordingsService } from './recordings.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -43,6 +44,7 @@ export class CallsController {
     private readonly telnyxProvider: TelnyxProvider,
     private readonly asteriskProvider: AsteriskProvider,
     private readonly recordings: RecordingsService,
+    private readonly limits: CallLimitsService,
     private readonly settings: SettingsService,
     private readonly users: UsersService,
   ) {}
@@ -231,6 +233,17 @@ export class CallsController {
     res.setHeader('Content-Type', this.recordings.contentType(safeName));
     stream.pipe(res);
     stream.on('error', () => res.end());
+  }
+
+  /**
+   * What this recruiter has left today and this month, per region.
+   *
+   * The apps call this before dialling so someone finds out they are at the
+   * limit before the candidate's phone rings, not after.
+   */
+  @Get('allowance')
+  allowance(@CurrentUser() user: User) {
+    return this.limits.allowance(user);
   }
 
   // ----- History -----

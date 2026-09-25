@@ -238,6 +238,27 @@ export class UsersService {
     return this.usersRepo.save(user);
   }
 
+  /**
+   * Per-user call limits, which override the shared ones in Settings.
+   *
+   * Merged into providerConfig rather than replacing it — that object also
+   * carries the person's number and SIP line, and losing those would take
+   * their phone off the air.
+   */
+  async setCallLimits(id: string, limits: Record<string, unknown>): Promise<User> {
+    const user = await this.findById(id);
+    const cleaned: Record<string, number> = {};
+    for (const [key, value] of Object.entries(limits ?? {})) {
+      const n = Number(value);
+      // Blank means "fall back to the shared limit", so it is dropped rather
+      // than stored as zero — zero would read as "no calls at all".
+      if (value === '' || value === null || value === undefined) continue;
+      if (Number.isFinite(n) && n > 0) cleaned[key] = Math.floor(n);
+    }
+    user.providerConfig = { ...(user.providerConfig ?? {}), callLimits: cleaned };
+    return this.usersRepo.save(user);
+  }
+
   async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
     const user = await this.usersRepo
       .createQueryBuilder('user')

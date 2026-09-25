@@ -54,6 +54,7 @@ export default function UsersPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
+  const [limitsFor, setLimitsFor] = useState<User | null>(null);
   const [form, setForm] = useState<UserForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -358,6 +359,13 @@ export default function UsersPage() {
                         <Button
                           variant="ghost"
                           className="!px-2 !py-1"
+                          onClick={() => setLimitsFor(user)}
+                        >
+                          Limits
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="!px-2 !py-1"
                           onClick={() => toggleStatus(user)}
                           disabled={user.id === me?.id}
                         >
@@ -618,6 +626,14 @@ export default function UsersPage() {
           </Button>
         </div>
       </Modal>
+    <LimitsModal
+        user={limitsFor}
+        onClose={() => setLimitsFor(null)}
+        onSaved={() => {
+          setLimitsFor(null);
+          load();
+        }}
+      />
     </div>
   );
 }
@@ -631,4 +647,104 @@ function Th({ children }: { children: React.ReactNode }) {
 }
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-4 py-3 text-slate-600 ${className ?? ''}`}>{children}</td>;
+}
+
+const LIMIT_REGIONS: { key: string; label: string }[] = [
+  { key: 'usa', label: 'USA' },
+  { key: 'india', label: 'India' },
+  { key: 'uae', label: 'UAE' },
+];
+
+/**
+ * Per-user call limits. Blank means "use the shared limit from Settings",
+ * which is why empty fields are sent as empty rather than zero — zero would
+ * mean this person may make no calls at all.
+ */
+function LimitsModal({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user: User | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const current = (user as any)?.providerConfig?.callLimits ?? {};
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(current)) next[k] = String(v ?? '');
+    setValues(next);
+    setError(null);
+  }, [user]);
+
+  if (!user) return null;
+  const regions = LIMIT_REGIONS.filter((r) => (user.regions ?? []).includes(r.key as any));
+  const shown = regions.length > 0 ? regions : LIMIT_REGIONS;
+
+  async function save() {
+    if (!user) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/users/${user.id}/limits`, { method: 'PATCH', body: values });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the limits');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={!!user} title={`Call limits — ${user.name}`} onClose={onClose} wide>
+      <p className="text-sm text-slate-500">
+        Leave a field blank to use the shared limit from Settings. These apply to calls this
+        person places; incoming calls are never limited.
+      </p>
+      <div className="mt-4 space-y-4">
+        {shown.map((region) => (
+          <div key={region.key}>
+            <h3 className="text-sm font-semibold text-slate-900">{region.label}</h3>
+            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(
+                [
+                  ['ManualDaily', 'Manual / day'],
+                  ['ManualMonthly', 'Manual / month'],
+                  ['AiDaily', 'AI / day'],
+                  ['AiMonthly', 'AI / month'],
+                ] as const
+              ).map(([suffix, label]) => {
+                const key = `${region.key}${suffix}`;
+                return (
+                  <div key={key}>
+                    <Label>{label}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={values[key] ?? ''}
+                      placeholder="—"
+                      onChange={(e) => setValues({ ...values, [key]: e.target.value })}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save limits'}
+        </Button>
+      </div>
+    </Modal>
+  );
 }
