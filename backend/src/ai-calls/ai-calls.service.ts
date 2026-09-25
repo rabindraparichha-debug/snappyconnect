@@ -25,6 +25,7 @@ import { NotificationType } from '../notifications/notification.entity';
 import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
 import { ComposeSmsDto } from './dto/compose-sms.dto';
+import { CallLimitsService } from '../calls/call-limits.service';
 import { DispatchAiCallDto } from './dto/dispatch-ai-call.dto';
 
 /**
@@ -46,6 +47,7 @@ export class AiCallsService {
 
   constructor(
     private readonly dncService: DncService,
+    private readonly limits: CallLimitsService,
     private readonly notifications: NotificationsService,
     @InjectRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
@@ -74,6 +76,11 @@ export class AiCallsService {
 
     const region = dto.region ?? guessRegion(number) ?? this.soleRegion(user);
     const trunk = region ? REGION_TRUNKS[region] : undefined;
+    if (region) {
+      // Enforced here, where the server itself places the call — an AI call
+      // costs money whether or not anyone is watching the counter.
+      await this.limits.assertAllowed(user, region, 'ai');
+    }
     if (!region || !trunk) {
       throw new BadRequestException(
         'AI calling works for USA and UAE numbers. Use +1… or a UAE format ' +

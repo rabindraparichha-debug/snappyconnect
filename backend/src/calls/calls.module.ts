@@ -13,6 +13,7 @@ import { CallRequest } from './call-request.entity';
 import { User } from '../users/user.entity';
 import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
+import { CallLimitsService } from './call-limits.service';
 import { RecordingsService } from './recordings.service';
 import { VoicemailsModule } from '../voicemails/voicemails.module';
 import { VoiceWebhookController } from './voice-webhook.controller';
@@ -31,7 +32,7 @@ import { WebhooksController } from './webhooks.controller';
     UsersModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
-  providers: [CallsService, RecordingsService],
-  exports: [CallsService, RecordingsService],
+  providers: [CallLimitsService, CallsService, RecordingsService],
+  exports: [CallsService, RecordingsService, CallLimitsService],
 })
 export class CallsModule {}

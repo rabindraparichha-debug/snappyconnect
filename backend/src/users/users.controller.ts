@@ -152,6 +152,15 @@ export class UsersController {
     return this.usersService.assignProvider(id, dto);
   }
 
+  /** Per-user call limits; blank fields fall back to Settings. */
+  @Patch(':id/limits')
+  setLimits(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.usersService.setCallLimits(id, body ?? {});
+  }
+
   /** Give this user their own US number + SIP line so inbound calls ring them. */
   @Post(':id/telnyx-line')
   async provisionLine(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ProvisionLineDto) {

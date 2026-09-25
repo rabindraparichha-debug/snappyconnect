@@ -44,6 +44,26 @@ const SECTIONS: { key: string; title: string; description: string; fields: Field
     ],
   },
   {
+    key: 'limits',
+    title: 'Call Limits',
+    description:
+      'How many calls each person may place, per region. Leave blank for no limit. A limit set on an individual user (Users → Limits) overrides these.',
+    fields: [
+      { key: 'usaManualDaily', label: 'USA — manual per day', placeholder: 'e.g. 80' },
+      { key: 'usaManualMonthly', label: 'USA — manual per month', placeholder: 'e.g. 1500' },
+      { key: 'usaAiDaily', label: 'USA — AI per day', placeholder: 'e.g. 40' },
+      { key: 'usaAiMonthly', label: 'USA — AI per month', placeholder: 'e.g. 600' },
+      { key: 'indiaManualDaily', label: 'India — manual per day' },
+      { key: 'indiaManualMonthly', label: 'India — manual per month' },
+      { key: 'indiaAiDaily', label: 'India — AI per day' },
+      { key: 'indiaAiMonthly', label: 'India — AI per month' },
+      { key: 'uaeManualDaily', label: 'UAE — manual per day' },
+      { key: 'uaeManualMonthly', label: 'UAE — manual per month' },
+      { key: 'uaeAiDaily', label: 'UAE — AI per day' },
+      { key: 'uaeAiMonthly', label: 'UAE — AI per month' },
+    ],
+  },
+  {
     key: 'grandstream',
     title: 'Grandstream PBX (UAE)',
     description: 'UCM PBX with a shared Wave extension. All UAE users call through this extension — one call at a time.',
