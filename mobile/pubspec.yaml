@@ -1,7 +1,7 @@
 name: snappyconnect_mobile
 description: "SnappyConnect mobile app — multi-provider calling for Android & iOS."
 publish_to: 'none'
-version: 1.10.1+19
+version: 1.10.13+31
 
 environment:
   sdk: ^3.12.2
@@ -30,6 +30,14 @@ dependencies:
   livekit_client: ^2.11.0
   package_info_plus: ^10.2.1
   ota_update: ^7.0.0
+  # On-device dictation for composing SMS; no audio leaves the phone.
+  speech_to_text: ^7.0.0
+  # Voicemail playback. Recordings sit behind auth, so the player needs to
+  # send the bearer token with its own request.
+  just_audio: ^0.9.46
+  # Recording a voice sample for cloning, and a temp path to hold it.
+  record: ^7.1.1
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

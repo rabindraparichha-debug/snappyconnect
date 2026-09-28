@@ -5,6 +5,7 @@ import '../services/update_service.dart';
 import 'dialer_screen.dart';
 import 'messages_screen.dart';
 import 'history_screen.dart';
+import 'voicemail_screen.dart';
 import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -53,7 +54,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [DialerScreen(), MessagesScreen(), HistoryScreen(), ProfileScreen()],
+        children: const [
+          DialerScreen(),
+          MessagesScreen(),
+          VoicemailScreen(),
+          HistoryScreen(),
+          ProfileScreen(),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -61,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dialpad), label: 'Dialer'),
           NavigationDestination(icon: Icon(Icons.forum_outlined), label: 'Messages'),
+          NavigationDestination(icon: Icon(Icons.voicemail_outlined), label: 'Voicemail'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
         ],

@@ -5,6 +5,7 @@ import 'package:livekit_client/livekit_client.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../api/api_client.dart';
+import '../services/audio_session.dart';
 
 class LiveAiCall {
   LiveAiCall.fromJson(Map<String, dynamic> json)
@@ -38,6 +39,9 @@ class _AiCallsScreenState extends State<AiCallsScreen> {
   Room? _room;
   String? _joinedId;
   bool _live = false; // publishing our mic (after takeover)
+  /// Supervision is usually done with the phone on a desk, so default to the
+  /// loudspeaker; the earpiece is all but inaudible at arm's length.
+  bool _speaker = true;
   String _status = '';
 
   @override
@@ -75,26 +79,57 @@ class _AiCallsScreenState extends State<AiCallsScreen> {
   }
 
   Future<void> _join(LiveAiCall call, {required bool publish}) async {
-    if (publish) {
-      final mic = await Permission.microphone.request();
-      if (!mic.isGranted) {
-        setState(() => _status = 'Microphone permission is required to speak.');
-        return;
-      }
+    // Needed even to listen: the muted track that keeps the audio path open
+    // is still a microphone capture as far as iOS is concerned.
+    final mic = await Permission.microphone.request();
+    if (!mic.isGranted) {
+      setState(() => _status = publish
+          ? 'Microphone permission is required to speak.'
+          : 'Microphone permission is required, even to listen.');
+      return;
     }
     setState(() => _status = publish ? 'Going live…' : 'Connecting…');
     try {
+      // Ask for publish rights even when only listening: iOS gives a room no
+      // audio at all unless a microphone track exists, which is why Take over
+      // (which publishes) had sound and listening did not. The track we
+      // publish below is muted before it is published, so nothing audible
+      // ever leaves the phone.
       final token = await ApiClient.instance.post(
         '/ai-calls/${call.platformCallId}/listen-token',
-        body: {'publish': publish},
+        body: {'publish': true},
       ) as Map<String, dynamic>;
 
       await _room?.disconnect();
       final room = Room();
       _room = room;
+      // Listening publishes nothing, and without an explicit session iOS
+      // gives the room no audio path at all — which is why supervision was
+      // silent while Take over (which publishes) worked.
+      await CallAudioSession.beginRoom(speaker: _speaker);
       await room.connect(token['url'] as String, token['token'] as String);
+      // Playback does not always begin on its own, and iOS defaults to the
+      // earpiece — without both of these the screen says "Listening" in
+      // silence.
+      try {
+        await room.startAudio();
+      } catch (_) {
+        // Already started, or not needed on this platform.
+      }
+      await _applyAudioRoute();
       if (publish) {
         await room.localParticipant?.setMicrophoneEnabled(true);
+      } else {
+        // Muted first, published second — never the other way round.
+        // stopOnMute: false keeps the capture running, which is what keeps
+        // the audio path open so the call can be heard.
+        try {
+          final silent = await LocalAudioTrack.create();
+          await silent.mute(stopOnMute: false);
+          await room.localParticipant?.publishAudioTrack(silent);
+        } catch (_) {
+          // Worst case we are back to a silent listen, not a live mic.
+        }
       }
       if (!mounted) return;
       setState(() {
@@ -107,6 +142,15 @@ class _AiCallsScreenState extends State<AiCallsScreen> {
     } catch (err) {
       if (mounted) setState(() => _status = 'Could not join: $err');
     }
+  }
+
+  /// Force the route, rather than only preferring it: on iOS a preference
+  /// loses to whatever the system last chose, which is the earpiece.
+  Future<void> _applyAudioRoute() => CallAudioSession.setSpeaker(_speaker);
+
+  Future<void> _toggleSpeaker() async {
+    setState(() => _speaker = !_speaker);
+    await _applyAudioRoute();
   }
 
   Future<void> _takeOver(LiveAiCall call) async {
@@ -139,6 +183,9 @@ class _AiCallsScreenState extends State<AiCallsScreen> {
       await _room?.disconnect();
     } catch (_) {}
     _room = null;
+    // Hand the audio session back, or the phone stays in call mode and other
+    // apps play through the earpiece.
+    await CallAudioSession.end();
     if (!silent && mounted) {
       setState(() {
         _joinedId = null;
@@ -248,12 +295,30 @@ class _AiCallsScreenState extends State<AiCallsScreen> {
                       icon: const Icon(Icons.record_voice_over, size: 18),
                       label: const Text('Take over'),
                     ),
-                ] else
+                ] else ...[
                   OutlinedButton.icon(
                     onPressed: _leave,
                     icon: const Icon(Icons.logout, size: 18),
                     label: Text(_live ? 'Leave call' : 'Stop listening'),
                   ),
+                  const SizedBox(width: 10),
+                  IconButton.filledTonal(
+                    tooltip: _speaker ? 'Speaker on' : 'Earpiece',
+                    onPressed: _toggleSpeaker,
+                    icon: Icon(_speaker ? Icons.volume_up : Icons.hearing),
+                  ),
+                  const Spacer(),
+                  // Deciding to step in happens while listening, so the
+                  // button has to be here and not one screen back.
+                  if (!_live && !call.takenOver)
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFE11D48)),
+                      onPressed: () => _takeOver(call),
+                      icon: const Icon(Icons.record_voice_over, size: 18),
+                      label: const Text('Take over'),
+                    ),
+                ],
               ],
             ),
           ],

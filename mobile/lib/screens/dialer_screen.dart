@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -11,6 +12,7 @@ import '../dial_intent.dart';
 import '../models.dart';
 import '../region.dart';
 import '../services/asterisk_call_service.dart';
+import '../services/audio_session.dart';
 import '../services/call_service_keeper.dart';
 import 'ai_calls_screen.dart';
 import 'incoming_call_screen.dart';
@@ -65,6 +67,11 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   Timer? _pollTimer;
   StreamSubscription<dynamic>? _pushSub;
   final Set<String> _seenRequests = {};
+  DateTime? _backgroundedAt;
+  /// Last AI-call brief, remembered so a recruiter working through a list of
+  /// candidates for one role types it once.
+  String? _lastAiGoal;
+  static const _aiGoalKey = 'ai_call_last_goal';
 
   @override
   void initState() {
@@ -88,6 +95,29 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     }
     _numberController.addListener(_autoSelectRegion);
     DialIntent.pending.addListener(_onDialIntent);
+    _loadLastAiGoal();
+    // Sign-out happens on the Profile tab, but the calling client lives here.
+    ApiClient.onSignOut = () async {
+      await _telnyx.signOut();
+      _asterisk.dispose();
+    };
+  }
+
+  Future<void> _loadLastAiGoal() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_aiGoalKey);
+    if (saved != null && saved.isNotEmpty && mounted) {
+      setState(() => _lastAiGoal = saved);
+    }
+  }
+
+  Future<void> _saveLastAiGoal(String? goal) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (goal == null || goal.isEmpty) {
+      await prefs.remove(_aiGoalKey);
+    } else {
+      await prefs.setString(_aiGoalKey, goal);
+    }
   }
 
   /// A number handed over from History or Messages ("call this person").
@@ -353,6 +383,17 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
       _status = '';
     });
 
+    // Check the allowance before dialling, so someone finds out they are at
+    // their limit instead of the candidate's phone ringing first.
+    final blocked = await _limitReason('manual');
+    if (blocked != null) {
+      setState(() {
+        _busy = false;
+        _status = blocked;
+      });
+      return;
+    }
+
     try {
       switch (_region) {
         case Regions.india:
@@ -400,11 +441,25 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
   /// When the app comes back after a native call, sync the outcome.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _backgroundedAt = DateTime.now();
+      return;
+    }
     if (state == AppLifecycleState.resumed) {
-      // Android freezes sockets while the app is backgrounded, so the
-      // registration is often dead on return. Re-check immediately rather
-      // than waiting for the next heartbeat.
-      if (_region != Regions.uae) _telnyx.ensureConnected();
+      final since = _backgroundedAt;
+      _backgroundedAt = null;
+      // A frozen Android socket reports itself connected after a thaw, so a
+      // liveness check passes and dialling then fails. After more than a few
+      // seconds away, rebuild rather than ask.
+      final wasAwayLong =
+          since != null && DateTime.now().difference(since) > const Duration(seconds: 10);
+      if (_region != Regions.uae) {
+        if (wasAwayLong) {
+          _telnyx.reconnectNow();
+        } else {
+          _telnyx.ensureConnected();
+        }
+      }
       if (_activeRequest != null) _completeNativeCall();
     }
   }
@@ -442,6 +497,9 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
         setState(() => _status = answered
             ? 'Call synced (${duration}s).'
             : 'Call logged as not answered.');
+      }
+      if (!answered || duration <= 20) {
+        await _offerFollowUp(request.phoneNumber);
       }
     } catch (err) {
       if (mounted) setState(() => _status = 'Sync failed: $err');
@@ -619,12 +677,18 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
 
   Future<void> _toggleSpeaker() async {
     final next = !_speakerOn;
+    // flutter_webrtc's own routing stopped working once LiveKit took over
+    // audio management, which left the speaker button doing nothing and every
+    // call stuck on the quiet earpiece. Route it through the manager that
+    // owns the session now, and keep the old call as a fallback for UAE
+    // (Asterisk) calls, which do not go through it.
+    await CallAudioSession.setSpeaker(next);
     try {
       await Helper.setSpeakerphoneOn(next);
-      setState(() => _speakerOn = next);
     } catch (_) {
-      // Some devices refuse before audio starts; the button just stays put.
+      // Non-fatal: the line above is the one that matters.
     }
+    if (mounted) setState(() => _speakerOn = next);
   }
 
   void _resetCallControls() {
@@ -632,6 +696,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     _held = false;
     if (_speakerOn) {
       _speakerOn = false;
+      CallAudioSession.setSpeaker(false);
       Helper.setSpeakerphoneOn(false).catchError((_) {});
     }
   }
@@ -697,6 +762,38 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     return _toUsE164(raw);
   }
 
+  /// Null when the call may go ahead, otherwise why it may not.
+  ///
+  /// Deliberately fails open: if the check itself fails, the recruiter still
+  /// gets to make their call, and the server-side count stays authoritative.
+  Future<String?> _limitReason(String kind) async {
+    final region = _region;
+    if (region == null) return null;
+    try {
+      final data = await ApiClient.instance.get('/calls/allowance') as List<dynamic>;
+      for (final entry in data) {
+        final row = entry as Map<String, dynamic>;
+        if (row['region'] != region) continue;
+        final bucket = row[kind] as Map<String, dynamic>?;
+        if (bucket == null) return null;
+        for (final period in ['daily', 'monthly']) {
+          final window = bucket[period] as Map<String, dynamic>?;
+          final limit = (window?['limit'] as num?)?.toInt();
+          final used = (window?['used'] as num?)?.toInt() ?? 0;
+          if (limit != null && used >= limit) {
+            final label = period == 'daily' ? 'today' : 'this month';
+            return kind == 'ai'
+                ? 'AI call limit reached — $used of $limit $label. Ask your admin to raise it.'
+                : 'Call limit reached — $used of $limit $label. Ask your admin to raise it.';
+          }
+        }
+      }
+    } catch (_) {
+      // Never block dialling because the check failed.
+    }
+    return null;
+  }
+
   Future<void> _startAiCall() async {
     final raw = _numberController.text.trim();
     if (raw.isEmpty) {
@@ -704,30 +801,57 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
       return;
     }
     final number = _toE164ForRegion(raw);
-    final goalController = TextEditingController();
+    final goalController = TextEditingController(text: _lastAiGoal ?? '');
+    final nameController = TextEditingController();
+    final companyController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('AI call $number'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'The AI agent makes the call and reports the result to your '
-              'call history. You can listen in or take over from the AI Calls '
-              'page on the dashboard.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: goalController,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'What should it achieve? (optional)',
-                hintText: 'e.g. Confirm interview availability this week',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'The AI agent makes the call and reports the result to your '
+                'call history. You can listen in or take over from the AI '
+                'Calls page.',
+                style: TextStyle(fontSize: 13),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Who are they? (optional)',
+                  hintText: 'e.g. Priya Sharma',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: companyController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Calling on behalf of (optional)',
+                  hintText: 'e.g. SnappyHires, or the client company',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: goalController,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'What should it say and achieve?',
+                  hintText:
+                      'e.g. Senior Java developer role, remote, \$120-140k. '
+                      'Check interest and availability this week.',
+                  helperText: 'Job details, or the pitch. Reused next time.',
+                  helperMaxLines: 2,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -745,12 +869,28 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     if (confirmed != true) return;
 
     setState(() => _busy = true);
+    final blocked = await _limitReason('ai');
+    if (blocked != null) {
+      setState(() {
+        _busy = false;
+        _status = blocked;
+      });
+      return;
+    }
     try {
+      final goal = goalController.text.trim();
+      final contact = nameController.text.trim();
+      final company = companyController.text.trim();
       await ApiClient.instance.post('/ai-calls', body: {
         'phoneNumber': number,
-        if (goalController.text.trim().isNotEmpty)
-          'goalPrompt': goalController.text.trim(),
+        if (goal.isNotEmpty) 'goalPrompt': goal,
+        if (contact.isNotEmpty) 'contactName': contact,
+        if (company.isNotEmpty) 'companyName': company,
       });
+      // Recruiters call a list about the same role; retyping the brief for
+      // every candidate is what stopped them filling it in at all.
+      _lastAiGoal = goal.isEmpty ? null : goal;
+      await _saveLastAiGoal(_lastAiGoal);
       if (mounted) {
         setState(() =>
             _status = 'AI agent is calling $number — tap the robot icon (top right) to listen in.');
@@ -816,6 +956,60 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     }
   }
 
+  /// Live proof that the microphone is reaching the call.
+  ///
+  /// Without it, "they cannot hear me" is indistinguishable from a bad line:
+  /// the bar moves when the phone hears you, and the warning appears when the
+  /// call is carrying no sound from this device at all.
+  Widget _micMeter() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _telnyx.micLevel,
+      builder: (context, level, _) => ValueListenableBuilder<bool>(
+        valueListenable: _telnyx.micSilent,
+        builder: (context, silent, _) => Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _telnyx.muted ? Icons.mic_off : Icons.mic,
+                    size: 16,
+                    color: silent ? const Color(0xFFDC2626) : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: (level * 6).clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor: const Color(0xFFE2E8F0),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          silent ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (silent && !_telnyx.muted)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Your microphone is not reaching the call. Check '
+                    'Settings › SnappyConnect › Microphone.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Color(0xFFDC2626)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _finishTelnyxCall(String number) async {
     _elapsedTimer?.cancel();
     _resetCallControls();
@@ -840,6 +1034,91 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
     } catch (_) {
       // Telnyx webhooks are the fallback source of truth.
     }
+
+    // A very short "answer" is almost always voicemail picking up, so treat
+    // it the same as no answer and offer the follow-up text either way.
+    if (!answered || duration <= 20) await _offerFollowUp(number);
+  }
+
+  /// After an unanswered call, offer a ready-made text so the attempt still
+  /// reaches the candidate. Pre-filled but editable — and never sent without
+  /// the recruiter tapping Send.
+  Future<void> _offerFollowUp(String number) async {
+    if (!mounted) return;
+    final controller = TextEditingController(
+      text: 'Hi, I just tried to reach you about a job opportunity. '
+          'When would be a good time to talk?',
+    );
+    var sending = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('$number did not answer',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              const Text('Send a text so the attempt still reaches them.',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    child: const Text('Not now'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: sending
+                        ? null
+                        : () async {
+                            final body = controller.text.trim();
+                            if (body.isEmpty) return;
+                            setSheetState(() => sending = true);
+                            try {
+                              await ApiClient.instance.post('/sms/send',
+                                  body: {'to': number, 'body': body});
+                              if (sheetContext.mounted) Navigator.pop(sheetContext);
+                              if (mounted) {
+                                setState(() => _status =
+                                    'Text sent — replies appear in Messages.');
+                              }
+                            } catch (err) {
+                              setSheetState(() => sending = false);
+                              if (sheetContext.mounted) {
+                                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                  SnackBar(content: Text('Could not send: $err')),
+                                );
+                              }
+                            }
+                          },
+                    icon: const Icon(Icons.send, size: 18),
+                    label: Text(sending ? 'Sending…' : 'Send text'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ---------- UI ----------
@@ -907,6 +1186,11 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
                       keyboardType: TextInputType.phone,
                       textAlign: TextAlign.center,
                       readOnly: _inTelnyxCall,
+                      // The number pad has no return key, so without these the
+                      // system keyboard covers the dialer with no way back.
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                      onTapOutside: (_) => FocusScope.of(context).unfocus(),
                       style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                       decoration: InputDecoration(
                         isDense: _inTelnyxCall,
@@ -933,6 +1217,7 @@ class _DialerScreenState extends State<DialerScreen> with WidgetsBindingObserver
                           style: const TextStyle(color: Color(0xFF3540C9)),
                         ),
                       ),
+                    if (_inTelnyxCall) _micMeter(),
                     SizedBox(height: _inTelnyxCall ? 6 : 12),
                     // Mid-call the keypad sends DTMF instead of editing the
                     // number, so recruiters can drive an IVR menu.

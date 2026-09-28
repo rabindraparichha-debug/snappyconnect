@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:telnyx_webrtc/telnyx_webrtc.dart';
 import 'package:telnyx_webrtc/model/connection_status.dart';
 import 'package:telnyx_webrtc/model/push_notification.dart';
 import 'package:telnyx_webrtc/utils/logging/log_level.dart';
 
+import 'audio_session.dart';
 import 'push_service.dart';
 
 /// States surfaced to the UI for a Telnyx WebRTC call.
@@ -32,11 +35,21 @@ class TelnyxCallService {
   TelnyxStateCallback? _onCallState;
 
   IncomingInviteParams? _pendingInvite;
+  /// CallKit id for the call in progress, so the OS call UI can be told when
+  /// it connects and when it ends.
+  String? _callKitId;
   String _callerName = 'SnappyConnect';
   String _callerNumber = '';
 
   bool muted = false;
   bool held = false;
+
+  /// Live microphone level (0..1) while a call is up, and how long it has sat
+  /// at zero. A mic that never registers is the difference between "bad line"
+  /// and "the other side hears nothing", which is otherwise invisible.
+  final ValueNotifier<double> micLevel = ValueNotifier<double>(0);
+  final ValueNotifier<bool> micSilent = ValueNotifier<bool>(false);
+  DateTime? _micSoundAt;
   bool get inCall => _call != null;
 
   /// Register with Telnyx and stay registered so incoming calls ring.
@@ -65,6 +78,21 @@ class TelnyxCallService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Rebuild the connection whether or not it claims to be alive.
+  ///
+  /// Android freezes sockets in the background, and a thawed socket happily
+  /// reports "connected" while being dead — so after a spell in the
+  /// background the app looked registered and simply could not dial until it
+  /// was force-closed. Assuming the worst after a long background is cheaper
+  /// than trusting that claim.
+  Future<void> reconnectNow() async {
+    if (_disposed || _mintToken == null) return;
+    if (_call != null) return; // never disturb a live call
+    _clientReady = false;
+    _teardownClient();
+    await _connect().catchError((_) {});
   }
 
   /// Cheap liveness check; reconnects if the registration has gone stale.
@@ -109,10 +137,22 @@ class TelnyxCallService {
   void _attachClientHandlers(TelnyxClient client, Completer<void>? completer) {
     client.onSocketErrorReceived = (error) {
       _clientReady = false;
+      final message = error.errorMessage;
       if (completer != null && !completer.isCompleted) {
-        completer.completeError(Exception(error.errorMessage));
+        completer.completeError(Exception(message));
       }
-      _onCallState?.call(TelnyxCallUiState.error, error.errorMessage);
+      // The SDK stores its login details only once the socket has opened, so
+      // if the socket dies mid-handshake its own retry has nothing to retry
+      // with and it reports this forever. We always can rebuild: mint a fresh
+      // token and start a clean client instead of showing a dead end.
+      if (message.toLowerCase().contains('no stored configuration')) {
+        _onCallState?.call(TelnyxCallUiState.connecting, 'Reconnecting…');
+        _clientReady = false;
+        _teardownClient();
+        _scheduleReconnect();
+        return;
+      }
+      _onCallState?.call(TelnyxCallUiState.error, message);
       _scheduleReconnect();
     };
 
@@ -182,7 +222,9 @@ class TelnyxCallService {
             // live socket. Null on Android until FCM is wired up.
             notificationToken: await PushService.deviceToken(),
             logLevel: LogLevel.none,
-            debug: false,
+            // Turns on the WebRTC stats reporter, which is what feeds the
+            // microphone level above.
+            debug: true,
           ),
         );
       } else {
@@ -235,9 +277,26 @@ class TelnyxCallService {
 
   void _attachCall(Call call, TelnyxStateCallback onState) {
     _call = call;
+    // The microphone is only captured once the session is configured for
+    // two-way audio, and nothing else does it for us.
+    CallAudioSession.begin();
     muted = false;
     held = false;
     _onCallState = onState;
+    _micSoundAt = null;
+    micLevel.value = 0;
+    micSilent.value = false;
+    call.onCallQualityChange = (metrics) {
+      final level = metrics.outboundAudioLevel;
+      micLevel.value = level;
+      final now = DateTime.now();
+      if (level > 0.002) _micSoundAt = now;
+      // Five seconds of absolute silence from the microphone means the app
+      // never got it, not that the recruiter is quiet.
+      final since = _micSoundAt;
+      micSilent.value = !muted &&
+          (since == null || now.difference(since) > const Duration(seconds: 5));
+    };
     call.callHandler.onCallStateChanged = (CallState state) {
       switch (state) {
         case CallState.connecting:
@@ -246,12 +305,21 @@ class TelnyxCallService {
         case CallState.ringing:
           onState(TelnyxCallUiState.ringing, null);
         case CallState.active:
+          // Activates the iOS audio session; without it the microphone stays
+          // with the OS and the other side hears nothing.
+          final connectedId = _callKitId;
+          if (connectedId != null) PushService.setConnected(connectedId);
           onState(TelnyxCallUiState.active, null);
         case CallState.done:
         case CallState.dropped:
           _call = null;
           muted = false;
           held = false;
+          _callKitId = null;
+          micLevel.value = 0;
+          micSilent.value = false;
+          CallAudioSession.end();
+          PushService.endAllCalls();
           onState(TelnyxCallUiState.ended, null);
         default:
           break;
@@ -298,6 +366,10 @@ class TelnyxCallService {
     _client = client;
     _attachClientHandlers(client, null);
 
+    // CallKit is already showing this call (the push created it), so reuse its
+    // id — that is what tells iOS to hand over the audio session on answer.
+    _callKitId = (metadata['call_id'] as String?) ?? _callKitId;
+
     final meta = PushMetaData.fromJson(metadata)
       ..isAnswer = answer
       ..isDecline = decline;
@@ -312,7 +384,7 @@ class TelnyxCallService {
         sipCallerIDNumber: _callerNumber,
         notificationToken: await PushService.deviceToken(),
         logLevel: LogLevel.none,
-        debug: false,
+        debug: true,
       ),
       null,
     );
@@ -340,6 +412,9 @@ class TelnyxCallService {
       onState(TelnyxCallUiState.error, 'Not connected to the calling service yet.');
       return;
     }
+    final callKitId = DateTime.now().microsecondsSinceEpoch.toString();
+    _callKitId = callKitId;
+    await PushService.startOutgoingCall(id: callKitId, destination: destination);
     final call =
         client.newInvite(callerName, _callerNumber, destination, 'snappyconnect');
     _attachCall(call, onState);
@@ -354,6 +429,7 @@ class TelnyxCallService {
       return;
     }
     _pendingInvite = null;
+    _callKitId ??= invite.callID;
     final call = client.acceptCall(invite, _callerName, _callerNumber, 'snappyconnect');
     _attachCall(call, onState);
     onState(TelnyxCallUiState.connecting, null);
@@ -381,6 +457,34 @@ class TelnyxCallService {
 
   void hangup() {
     _call?.endCall();
+  }
+
+  /// Sign this device off Telnyx for good, on logout.
+  ///
+  /// Clearing the app's token is not enough: Telnyx keeps delivering calls to
+  /// a registered device, and the VoIP push credential stays bound to the
+  /// connection — which is why a logged-out phone kept ringing.
+  Future<void> signOut() async {
+    _reconnectTimer?.cancel();
+    _healthTimer?.cancel();
+    _mintToken = null;
+    _pendingInvite = null;
+    try {
+      _call?.endCall();
+    } catch (_) {
+      /* nothing to end */
+    }
+    _call = null;
+    try {
+      // Tells Telnyx to stop sending VoIP pushes to this device.
+      _client?.disablePushNotifications();
+    } catch (_) {
+      /* best effort */
+    }
+    _clientReady = false;
+    _teardownClient();
+    await PushService.endAllCalls();
+    await CallAudioSession.end();
   }
 
   void dispose() {

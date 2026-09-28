@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../theme_controller.dart';
 import 'login_screen.dart';
+import 'voice_clone_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -45,7 +47,50 @@ class ProfileScreen extends StatelessWidget {
                 _InfoTile(label: 'Country', value: user.country ?? '—'),
                 _InfoTile(label: 'Calling Provider', value: user.providerLabel),
                 _InfoTile(label: 'Server', value: ApiClient.instance.baseUrl),
+                const SizedBox(height: 16),
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: ThemeController.mode,
+                  builder: (context, mode, _) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Appearance',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      SegmentedButton<ThemeMode>(
+                        segments: const [
+                          ButtonSegment(
+                            value: ThemeMode.light,
+                            icon: Icon(Icons.light_mode_outlined, size: 18),
+                            label: Text('Light'),
+                          ),
+                          ButtonSegment(
+                            value: ThemeMode.dark,
+                            icon: Icon(Icons.dark_mode_outlined, size: 18),
+                            label: Text('Dark'),
+                          ),
+                          ButtonSegment(
+                            value: ThemeMode.system,
+                            icon: Icon(Icons.phone_iphone, size: 18),
+                            label: Text('Auto'),
+                          ),
+                        ],
+                        selected: {mode},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (selection) =>
+                            ThemeController.set(selection.first),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 24),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const VoiceCloneScreen()),
+                  ),
+                  icon: const Icon(Icons.record_voice_over_outlined),
+                  label: const Text('My AI voice'),
+                ),
+                const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: () async {
                     await ApiClient.instance.logout();

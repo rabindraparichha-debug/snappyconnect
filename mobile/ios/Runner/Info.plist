@@ -36,6 +36,8 @@
 	<string>SnappyConnect can route call audio to Bluetooth headsets.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>SnappyConnect does not use the camera; this permission is required by the calling engine and is never requested.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>SnappyConnect turns speech into text when you dictate a message.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>SnappyConnect uses the microphone for VoIP calls.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -108,9 +108,55 @@ class PushService {
           // Wakes the screen for a call the way a real dialer does.
           isShowFullLockedScreen: true,
         ),
-        ios: const IOSParams(handleType: 'generic', supportsHolding: true),
+        ios: const IOSParams(
+          handleType: 'generic',
+          supportsHolding: true,
+          configureAudioSession: false,
+        ),
       ),
     );
+  }
+
+  /// Tell the OS about a call *we* are placing.
+  ///
+  /// iOS only hands the microphone to a VoIP app for a call CallKit knows
+  /// about: without this the recruiter hears the candidate but the candidate
+  /// hears silence, because the audio session is never activated for capture.
+  /// Incoming calls already go through CallKit via the push, which is why only
+  /// outbound was one-way.
+  static Future<void> startOutgoingCall({
+    required String id,
+    required String destination,
+  }) async {
+    try {
+      await FlutterCallkitIncoming.startCall(
+        CallKitParams(
+          id: id,
+          nameCaller: destination,
+          handle: destination,
+          type: 0,
+          appName: 'SnappyConnect',
+          ios: const IOSParams(
+            handleType: 'generic',
+            supportsHolding: true,
+            // WebRTC owns the audio session. If CallKit configures it too the
+            // two fight and the call goes silent in both directions.
+            configureAudioSession: false,
+          ),
+        ),
+      );
+    } catch (_) {
+      // Never block dialling on the OS call UI.
+    }
+  }
+
+  /// Mark a call answered so iOS activates the audio session.
+  static Future<void> setConnected(String id) async {
+    try {
+      await FlutterCallkitIncoming.setCallConnected(id);
+    } catch (_) {
+      /* noop */
+    }
   }
 
   /// Clear any call CallKit is still showing, so no stale incoming screen is
