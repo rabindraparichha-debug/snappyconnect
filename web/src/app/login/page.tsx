@@ -1,12 +1,23 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, setSession } from '@/lib/api';
+import { API_URL, api, setSession } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { Button, Input, Label } from '@/components/ui';
 import { Logo } from '@/components/Logo';
+
+// Messages for a "Continue with SnappyHires" sign-in that did not complete.
+const SSO_ERRORS: Record<string, string> = {
+  no_account:
+    'No SnappyConnect account uses this e-mail. Ask an admin for access, then continue with SnappyHires.',
+  unverified:
+    'Your SnappyHires account has no verified e-mail yet, so it cannot be linked. Sign in with your password instead.',
+  expired: 'That sign-in request expired. Try again.',
+  disabled: 'Sign-in with SnappyHires is not switched on for this server yet.',
+  failed: 'Sign-in with SnappyHires did not complete. Try again.',
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +25,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Back from the shared login: the API put our session token in the URL
+  // fragment (never sent to any server). Store it exactly as a password login would.
+  useEffect(() => {
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const ssoToken = hash.get('sso');
+    const ssoError = new URLSearchParams(window.location.search).get('sso_error');
+    if (ssoToken || ssoError) window.history.replaceState(null, '', '/login');
+    if (ssoError && ssoError !== 'cancelled') {
+      setError(SSO_ERRORS[ssoError] ?? SSO_ERRORS.failed);
+    }
+    if (!ssoToken) return;
+    setLoading(true);
+    localStorage.setItem('sc_token', ssoToken);
+    api<User>('/auth/me')
+      .then((user) => {
+        setSession(ssoToken, user);
+        router.replace('/dashboard');
+      })
+      .catch(() => {
+        localStorage.removeItem('sc_token');
+        setError(SSO_ERRORS.failed);
+        setLoading(false);
+      });
+  }, [router]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -71,6 +107,17 @@ export default function LoginPage() {
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
+          <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            or
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+          <a
+            href={`${API_URL}/auth/snappyhires/start`}
+            className="flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Continue with SnappyHires
+          </a>
           <p className="mt-4 text-center text-sm">
             <Link href="/forgot-password" className="text-brand-600 hover:underline">
               Forgot your password?
