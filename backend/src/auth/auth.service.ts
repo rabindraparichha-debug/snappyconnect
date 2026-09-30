@@ -24,13 +24,29 @@ export class AuthService {
       throw new UnauthorizedException('Account is deactivated. Contact your administrator.');
     }
 
+    delete user.passwordHash;
+    return this.issueSession(user);
+  }
+
+  /**
+   * "Continue with SnappyHires": the shared login already proved the person
+   * owns this verified e-mail. Only an existing, active user gets in — never
+   * created here (SnappyConnect is invite-only). Null means "ask an admin".
+   */
+  async loginWithVerifiedEmail(email: string) {
+    const user = await this.usersService.findByEmailWithPassword(email);
+    if (!user || user.status !== UserStatus.ACTIVE) return null;
+    delete user.passwordHash;
+    return this.issueSession(user);
+  }
+
+  /** The same token either way, so roles and guards need no special case. */
+  private async issueSession(user: User) {
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       email: user.email,
       role: user.role,
     });
-
-    delete user.passwordHash;
     return { accessToken, user };
   }
 

@@ -6,6 +6,7 @@ import { MailerService } from '../common/mailer.service';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { SnappyhiresSsoController } from './snappyhires-sso.controller';
 import { JwtStrategy } from './jwt.strategy';
 
 @Module({
@@ -22,7 +23,7 @@ import { JwtStrategy } from './jwt.strategy';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, SnappyhiresSsoController],
   providers: [AuthService, JwtStrategy, MailerService],
   exports: [AuthService],
 })
