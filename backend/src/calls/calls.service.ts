@@ -44,6 +44,8 @@ export class CallsService {
     private readonly callLogsRepo: Repository<CallLog>,
     @InjectRepository(CallRequest)
     private readonly requestsRepo: Repository<CallRequest>,
+    @InjectRepository(User)
+    private readonly usersRepo: Repository<User>,
     private readonly providersService: ProvidersService,
     private readonly notificationsService: NotificationsService,
     private readonly activityService: ActivityService,
@@ -497,10 +499,17 @@ export class CallsService {
       return;
     }
 
-    const log = await this.callLogsRepo.findOne({ where: { externalId: legId } });
+    let log = await this.callLogsRepo.findOne({ where: { externalId: legId } });
     if (!log) {
-      this.logger.debug(`No call log for Telnyx leg ${legId} (${eventType})`);
-      return;
+      // An incoming call only reached history if the app happened to report
+      // it — so a call answered from the phone's own call screen, or one that
+      // arrived while the app was closed, vanished. Telnyx tells us about it
+      // either way, so the record is created here instead.
+      log = await this.createInboundLog(legId, payload);
+      if (!log) {
+        this.logger.debug(`No call log for Telnyx leg ${legId} (${eventType})`);
+        return;
+      }
     }
 
     switch (eventType) {
@@ -524,6 +533,42 @@ export class CallsService {
         return;
     }
     await this.callLogsRepo.save(log);
+  }
+
+  /**
+   * Create history for an incoming call Telnyx has told us about.
+   *
+   * Attributed by the number that was dialled, which is the only thing that
+   * reliably identifies whose line rang — the app may never have been running.
+   */
+  private async createInboundLog(legId: string, payload: any): Promise<CallLog | null> {
+    const direction: string | undefined = payload.direction;
+    const to: string | undefined = payload.to;
+    const from: string | undefined = payload.from;
+    if (direction !== 'incoming' || !to) return null;
+
+    const digits = String(to).replace(/\D/g, '');
+    const owner = digits
+      ? await this.usersRepo
+          .createQueryBuilder('user')
+          .where(
+            `regexp_replace(coalesce(user."providerConfig" ->> 'telnyxNumber', ''), '\\D', '', 'g') = :digits`,
+            { digits },
+          )
+          .getOne()
+      : null;
+
+    const log = this.callLogsRepo.create({
+      userId: owner?.id ?? null,
+      phoneNumber: from ?? 'Unknown',
+      provider: CallingProvider.TELNYX,
+      direction: CallDirection.INBOUND,
+      status: CallStatus.INITIATED,
+      externalId: legId,
+      startedAt: payload.start_time ? new Date(payload.start_time) : new Date(),
+      metadata: { source: 'telnyx-webhook', to },
+    });
+    return this.callLogsRepo.save(log);
   }
 
   /** Download a finished Telnyx recording and attach it to the call log. */
