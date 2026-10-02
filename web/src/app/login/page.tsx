@@ -68,7 +68,7 @@ type Tile = {
   detail: string;
   mobile?: string;
   tablet?: string;
-  desktop: string;
+  desktop: string; // lg split screen: six (the two side tiles hide; pushed off-edge they were cropped)
   rotate: string;
 };
 
@@ -77,8 +77,8 @@ const TILES: Tile[] = [
   { name: 'Hireish', accent: '#0d9488', kicker: 'New job', headline: 'Electrician', detail: 'Dubai · AED 3.5k/mo', mobile: 'left-[3%] top-[4%]', tablet: 'md:left-[4%] md:top-[5%]', desktop: 'lg:left-[7%] lg:top-[7%]', rotate: '-rotate-6' },
   { name: 'Calling', accent: '#16a34a', kicker: 'On a call', headline: '04:12', detail: 'To a candidate', desktop: 'lg:left-[37%] lg:top-[2%]', rotate: 'rotate-2' },
   { name: 'Staffio', accent: '#ea580c', kicker: 'Crew request', headline: '12 masons', detail: 'Abu Dhabi · Monday', mobile: 'right-[3%] top-[3%]', tablet: 'md:right-[4%] md:top-[4%]', desktop: 'lg:right-[6%] lg:top-[9%]', rotate: 'rotate-6' },
-  { name: 'SnappyHires ATS', accent: '#2563eb', kicker: 'Pipeline', headline: '8 · 3 · 1', detail: 'Screened · Submitted · Offer', tablet: 'md:left-[1%] md:top-[40%]', desktop: 'lg:left-[-7%] lg:top-[55%]', rotate: 'rotate-3' },
-  { name: 'Snappy Careers', accent: '#7c3aed', kicker: 'Your CV score', headline: '92 / 100', detail: '3 interviews this week', tablet: 'md:right-[1%] md:top-[38%]', desktop: 'lg:right-[-7%] lg:top-[53%]', rotate: '-rotate-3' },
+  { name: 'SnappyHires ATS', accent: '#2563eb', kicker: 'Pipeline', headline: '8 · 3 · 1', detail: 'Screened · Submitted · Offer', tablet: 'md:left-[1%] md:top-[40%]', desktop: 'lg:hidden', rotate: 'rotate-3' },
+  { name: 'Snappy Careers', accent: '#7c3aed', kicker: 'Your CV score', headline: '92 / 100', detail: '3 interviews this week', tablet: 'md:right-[1%] md:top-[38%]', desktop: 'lg:hidden', rotate: '-rotate-3' },
   { name: 'CRM', accent: '#db2777', kicker: 'Deal won', headline: '$12,400', detail: 'Acme Staffing', mobile: 'left-[5%] bottom-[-7%]', tablet: 'md:left-[6%] md:bottom-[-4%]', desktop: 'lg:left-[7%] lg:bottom-[8%]', rotate: '-rotate-[4deg]' },
   { name: 'Finance', accent: '#ca8a04', kicker: 'Invoice paid', headline: 'AED 18.4k', detail: 'INV-2041 · today', desktop: 'lg:left-[37%] lg:bottom-[3%]', rotate: 'rotate-2' },
   { name: 'WorkHub', accent: '#0891b2', kicker: 'Today', headline: '9 of 10 in', detail: 'First in 09:02', mobile: 'right-[5%] bottom-[-5%]', tablet: 'md:right-[6%] md:bottom-[-3%]', desktop: 'lg:right-[6%] lg:bottom-[10%]', rotate: 'rotate-[5deg]' },
@@ -205,6 +205,19 @@ function ProviderMark({ id }: { id: ProviderId }) {
       <path fill="#00A4EF" d="M0 11h10v10H0z" />
       <path fill="#FFB900" d="M11 11h10v10H11z" />
     </svg>
+  );
+}
+
+/** SnappyHires mark (the ATS SnappyMark, 20px): dark rounded square with a gradient "S". */
+function SnappyMark({ size = 20 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex shrink-0 items-center justify-center rounded-[22%] bg-[#020617] font-black text-white"
+      style={{ width: size, height: size, fontSize: size * 0.48 }}
+    >
+      <span className="bg-gradient-to-br from-[#a5b4fc] via-[#f0abfc] to-[#fde68a] bg-clip-text text-transparent">S</span>
+    </span>
   );
 }
 
@@ -348,6 +361,10 @@ function Sheet() {
                   <MailMark />
                   Continue with email
                 </button>
+                <button type="button" onClick={() => go()} className={pill}>
+                  <SnappyMark />
+                  Continue with SnappyHires
+                </button>
               </div>
               {moreProviders.length > 0 && (
                 <div className="mt-5 flex justify-center">
@@ -360,11 +377,6 @@ function Sheet() {
                   </button>
                 </div>
               )}
-              <div className="mt-5 text-center text-sm">
-                <button type="button" onClick={() => go()} className={link}>
-                  Use your SnappyHires account
-                </button>
-              </div>
             </>
           )}
         </>
