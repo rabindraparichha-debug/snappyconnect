@@ -9,7 +9,8 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test $(find dist-test -name '*.spec.js')"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

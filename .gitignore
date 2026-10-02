@@ -4,6 +4,7 @@ node_modules/
 
 # Builds
 dist/
+dist-test/
 .next/
 build/
 *.tsbuildinfo

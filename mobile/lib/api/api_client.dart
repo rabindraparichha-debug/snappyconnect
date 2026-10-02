@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import 'snappyhires_sign_in.dart';
 
 class ApiException implements Exception {
   ApiException(this.message, [this.statusCode]);
@@ -83,6 +84,25 @@ class ApiClient {
     baseUrl = normalizeServerUrl(serverUrl);
     final data = await post('/auth/login', body: {'email': email, 'password': password})
         as Map<String, dynamic>;
+    await _storeSession(data);
+  }
+
+  /// "Continue with SnappyHires". Returns false if the person closed the
+  /// sign-in sheet. The exchange answers with the same body as
+  /// `/auth/login`, so the session is stored exactly the same way.
+  Future<bool> loginWithSnappyHires(String serverUrl) async {
+    baseUrl = normalizeServerUrl(serverUrl);
+    final grant = await SnappyHiresSignIn.authorize(baseUrl);
+    if (grant == null) return false;
+    final data = await post('/auth/snappyhires/exchange', body: {
+      'code': grant.code,
+      'verifier': grant.verifier,
+    }) as Map<String, dynamic>;
+    await _storeSession(data);
+    return true;
+  }
+
+  Future<void> _storeSession(Map<String, dynamic> data) async {
     _token = data['accessToken'] as String;
     currentUser = User.fromJson(data['user'] as Map<String, dynamic>);
 
@@ -143,7 +163,9 @@ class ApiClient {
       throw ApiException('Could not reach the SnappyConnect server.');
     }
 
-    if (res.statusCode == 401) {
+    // A 401 while signing in is a wrong password, not an expired session.
+    final signingIn = path == '/auth/login' || path.startsWith('/auth/snappyhires/');
+    if (res.statusCode == 401 && !signingIn) {
       await logout();
       throw ApiException('Session expired — please sign in again.', 401);
     }
