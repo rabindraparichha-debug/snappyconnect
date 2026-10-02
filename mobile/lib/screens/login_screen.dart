@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../api/snappyhires_sign_in.dart';
 import '../main.dart';
 import 'home_screen.dart';
 
@@ -38,6 +39,37 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (err) {
       setState(() {
         _error = err.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  /// "Continue with SnappyHires": the shared account, for people who already
+  /// have a SnappyConnect account under the same email. Ends with the same
+  /// token as password sign-in, stored the same way.
+  Future<void> _snappyHiresLogin() async {
+    setState(() {
+      _error = null;
+      _loading = true;
+    });
+    try {
+      final signedIn = await ApiClient.instance.loginWithSnappyHires(
+        _serverController.text.trim(),
+      );
+      if (!mounted) return;
+      if (!signedIn) {
+        setState(() => _loading = false); // closed the sheet — nothing to say
+        return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err is SnappyHiresSignInError || err is ApiException
+            ? err.toString()
+            : 'SnappyHires sign-in failed. Please try again.';
         _loading = false;
       });
     }
@@ -127,6 +159,45 @@ class _LoginScreenState extends State<LoginScreen> {
                 FilledButton(
                   onPressed: _loading ? null : _login,
                   child: Text(_loading ? 'Signing in…' : 'Sign in'),
+                ),
+                const SizedBox(height: 16),
+                const Row(
+                  children: [
+                    Expanded(child: Divider()),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'or',
+                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                      ),
+                    ),
+                    Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _snappyHiresLogin,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: Container(
+                    width: 20,
+                    height: 20,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: brandColor,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: const Text(
+                      'S',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  label: const Text('Continue with SnappyHires'),
                 ),
               ],
             ),

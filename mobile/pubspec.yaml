@@ -30,6 +30,8 @@ dependencies:
   livekit_client: ^2.11.0
   package_info_plus: ^10.2.1
   ota_update: ^7.0.0
+  flutter_web_auth_2: ^5.1.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:
