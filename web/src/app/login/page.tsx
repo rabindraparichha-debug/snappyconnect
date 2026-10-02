@@ -79,13 +79,17 @@ const TILES: Tile[] = [
   { name: 'SnappyHires ATS', accent: '#2563eb', kicker: 'Pipeline', headline: '8 · 3 · 1', detail: 'Screened · Submitted · Offer', tablet: 'md:left-[1%] md:top-[40%]', desktop: 'lg:left-[-7%] lg:top-[55%]', rotate: 'rotate-3' },
   { name: 'Snappy Careers', accent: '#7c3aed', kicker: 'Your CV score', headline: '92 / 100', detail: '3 interviews this week', tablet: 'md:right-[1%] md:top-[38%]', desktop: 'lg:right-[-7%] lg:top-[53%]', rotate: '-rotate-3' },
   { name: 'CRM', accent: '#db2777', kicker: 'Deal won', headline: '$12,400', detail: 'Acme Staffing', mobile: 'left-[5%] bottom-[-7%]', tablet: 'md:left-[6%] md:bottom-[-4%]', desktop: 'lg:left-[7%] lg:bottom-[8%]', rotate: '-rotate-[4deg]' },
-  { name: 'Finance', accent: '#ca8a04', kicker: 'Invoice paid', headline: 'AED 18,400', detail: 'INV-2041 · today', desktop: 'lg:left-[37%] lg:bottom-[3%]', rotate: 'rotate-2' },
+  { name: 'Finance', accent: '#ca8a04', kicker: 'Invoice paid', headline: 'AED 18.4k', detail: 'INV-2041 · today', desktop: 'lg:left-[37%] lg:bottom-[3%]', rotate: 'rotate-2' },
   { name: 'WorkHub', accent: '#0891b2', kicker: 'Today', headline: '9 of 10 in', detail: 'First in 09:02', mobile: 'right-[5%] bottom-[-5%]', tablet: 'md:right-[6%] md:bottom-[-3%]', desktop: 'lg:right-[6%] lg:bottom-[10%]', rotate: 'rotate-[5deg]' },
 ];
 
 // BRANDS.calling from the shared sheet.
 const BRAND = {
   name: 'Calling platform',
+  /** Hero title and card labels — fits one line on a 375px phone. */
+  short: 'Calling',
+  /** The universe tile that IS this product, dropped so it never shows twice. */
+  tile: 'Calling',
   letter: 'C',
   accent: '#16a34a',
   tagline: 'Cloud calling across three countries — dialer, IVR and AI voice agents.',
@@ -97,10 +101,16 @@ const BRAND = {
   ],
 };
 
-/** The universe collage with this product's four cards in the phone-visible slots. */
+/**
+ * The universe collage with this product's four cards in the phone-visible
+ * slots. The universe "Calling" tile is dropped (its slot stays empty) so the
+ * product never shows twice.
+ */
 const HERO_TILES: Tile[] = (() => {
   let i = 0;
-  return TILES.map((t) => (t.mobile ? { ...t, ...BRAND.cards[i++], name: BRAND.name, accent: BRAND.accent } : t));
+  return TILES.filter((t) => t.mobile || t.name !== BRAND.tile).map((t) =>
+    t.mobile ? { ...t, ...BRAND.cards[i++], name: BRAND.short, accent: BRAND.accent } : t,
+  );
 })();
 
 function tileVisibility(t: Tile): string {
@@ -140,7 +150,7 @@ function Hero() {
         >
           {BRAND.letter}
         </span>
-        <h1 className="mt-4 text-4xl font-black tracking-tight text-[#020617] lg:mt-6 lg:text-6xl">{BRAND.name}</h1>
+        <h1 className="mt-4 text-4xl font-black tracking-tight text-[#020617] lg:mt-6 lg:text-6xl">{BRAND.short}</h1>
         <p className="mt-3 max-w-xs text-[15px] leading-snug text-[#334155] lg:max-w-sm lg:text-lg">
           {BRAND.tagline}
           <br className="hidden md:inline" />
