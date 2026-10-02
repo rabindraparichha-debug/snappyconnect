@@ -27,6 +27,7 @@ import { AiCallsModule } from './ai-calls/ai-calls.module';
 import { AuditModule } from './audit/audit.module';
 import { ContactListsModule } from './contact-lists/contact-lists.module';
 import { DncModule } from './dnc/dnc.module';
+import { UniverseModule } from './universe/universe.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -68,6 +69,7 @@ import { UsersModule } from './users/users.module';
     AiCallsModule,
     ContactListsModule,
     DncModule,
+    UniverseModule,
     SeedModule,
   ],
   controllers: [AppController],
