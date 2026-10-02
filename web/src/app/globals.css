@@ -161,8 +161,21 @@ body {
   color-scheme: dark;
 }
 
-/* The login screen's light gradient is the one backdrop not built from slate. */
+/* The password-reset screens' light gradient is the one backdrop not built from slate. */
 .dark .bg-gradient-to-br.from-slate-50 {
   background-image: none;
   background-color: #0b1220;
+}
+
+/*
+ * The sign-in sheet (/login) matches every other SnappyHires product's sheet,
+ * so it stays light in either theme: its colours are literal hex utilities the
+ * remaps above don't touch, and its fields opt out of the dark input surface.
+ */
+.dark .signin-sheet input {
+  background-color: #fff;
+  color: #0f172a;
+}
+.dark .signin-sheet input::placeholder {
+  color: #94a3b8;
 }
