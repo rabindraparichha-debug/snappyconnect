@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import type { Paginated, User } from '@/lib/types';
 import { Button, Card, EmptyState, Input, Modal, Select, Spinner } from '@/components/ui';
 import { SimPortsCard } from '@/components/SimPortsCard';
+import { SupportLineCard } from '@/components/SupportLineCard';
 
 interface AccountNumber {
   phoneNumber: string;
@@ -394,6 +395,8 @@ export default function NumbersPage() {
           </div>
         )}
       </Card>
+
+      <SupportLineCard />
 
       <Card className="mt-5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">

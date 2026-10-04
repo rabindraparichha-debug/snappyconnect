@@ -26,6 +26,7 @@ import { CallLog } from '../calls/call-log.entity';
 import { User } from '../users/user.entity';
 import { ComposeSmsDto } from './dto/compose-sms.dto';
 import { CallLimitsService } from '../calls/call-limits.service';
+import { SupportLineService } from '../calls/support-line.service';
 import { DispatchAiCallDto } from './dto/dispatch-ai-call.dto';
 
 /**
@@ -48,6 +49,7 @@ export class AiCallsService {
   constructor(
     private readonly dncService: DncService,
     private readonly limits: CallLimitsService,
+    private readonly supportLine: SupportLineService,
     private readonly notifications: NotificationsService,
     @InjectRepository(CallLog)
     private readonly callLogsRepo: Repository<CallLog>,
@@ -211,6 +213,11 @@ export class AiCallsService {
     if (!log) {
       this.logger.warn(`Platform callback for unknown task ${taskId}`);
       return { received: true };
+    }
+
+    // Inbound support calls answered by the AI operator have their own flow.
+    if (log.metadata?.support) {
+      return this.supportLine.handlePlatformEvent(log, payload);
     }
 
     if (payload.event === 'call.answered') {

@@ -15,6 +15,7 @@ import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
 import { CallLimitsService } from './call-limits.service';
 import { RecordingsService } from './recordings.service';
+import { SupportLineService } from './support-line.service';
 import { VoicemailsModule } from '../voicemails/voicemails.module';
 import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
@@ -32,7 +33,7 @@ import { WebhooksController } from './webhooks.controller';
     UsersModule,
   ],
   controllers: [CallsController, WebhooksController, VoiceWebhookController],
-  providers: [CallLimitsService, CallsService, RecordingsService],
-  exports: [CallsService, RecordingsService, CallLimitsService],
+  providers: [CallLimitsService, CallsService, RecordingsService, SupportLineService],
+  exports: [CallsService, RecordingsService, CallLimitsService, SupportLineService],
 })
 export class CallsModule {}
