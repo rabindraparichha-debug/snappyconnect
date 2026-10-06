@@ -159,7 +159,8 @@ POST /webhooks-config          ← admin token
 Also available: `GET /webhooks-config`, `POST /webhooks-config/:id/test`,
 `DELETE /webhooks-config/:id`.
 
-**Events:** `call.completed`, `disposition.set`, `sms.received`.
+**Events:** `call.completed`, `disposition.set`, `sms.received`, and the support-line
+events `support.call.started`, `support.call.handoff`, `support.call.completed` (below).
 
 **Delivery:** `POST` with `Content-Type: application/json`,
 `User-Agent: SnappyConnect-Webhook/1`, 10-second timeout, and — when a secret is
@@ -194,6 +195,57 @@ Verify over the **raw request bytes**, not re-serialized JSON.
 > **Always return `200`** for any payload whose signature validates, including the
 > `{ "test": true }` payload sent by the Test button. Returning 4xx for unknown
 > shapes makes healthy subscriptions look broken.
+
+### Support line (AI operator first)
+
+Admins switch this on under **Numbers → Support line**. A call to a support
+number (the board line unless others are listed) is answered by an AI operator
+on the voice platform. The caller's own leg stays with us: the AI's leg is a
+SIP leg we lend the call to, and when it ends we either hang up (the AI said
+the caller was done) or ring a person — the team member asked for by name,
+otherwise the operator, with voicemail if nobody answers. If the AI cannot
+take a call, or its leg ends without saying how, a person is rung; a caller is
+never dropped because the AI had a problem. With the switch off, or for any
+other number, the menu answers as before.
+
+Three events follow one call, each carrying the whole call so far (treat
+`data.id` as the key and merge):
+
+| event | when |
+|---|---|
+| `support.call.started` | the AI operator took the call |
+| `support.call.handoff` | the AI asked for a person, or ended the call |
+| `support.call.completed` | the AI's summary and transcript are ready; sent again when the caller's leg ends and when a voicemail is left |
+
+```json
+{
+  "event": "support.call.completed",
+  "firedAt": "2026-10-04T14:03:12.000Z",
+  "data": {
+    "id": "uuid",
+    "caller": "+13475550101",
+    "line": "+13325550100",
+    "region": "usa",
+    "stage": "ended",
+    "startedAt": "2026-10-04T14:00:00.000Z",
+    "endedAt": "2026-10-04T14:03:10.000Z",
+    "durationSeconds": 190,
+    "outcome": "TRANSFER",
+    "summary": "Asked about crew pricing; handed to the team.",
+    "reason": "Wants pricing for a 40-person crew",
+    "person": null,
+    "message": null,
+    "transcript": [{ "role": "assistant", "text": "…", "ts": 1.2 }],
+    "voicemailUrl": null,
+    "aiFailed": null
+  }
+}
+```
+
+`stage` is `ai` (the AI has the caller), `person` (handed to a team member) or
+`ended`. `outcome` is the AI's: `RESOLVED`, `UNRESOLVED`, `TRANSFER`,
+`MESSAGE` (with `message: { name, callback_number, message }`), `ABANDONED` or
+`ERROR`.
 
 ---
 

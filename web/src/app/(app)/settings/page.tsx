@@ -340,6 +340,9 @@ const WEBHOOK_EVENTS = [
   { value: 'call.completed', label: 'Call logged' },
   { value: 'sms.received', label: 'SMS received' },
   { value: 'disposition.set', label: 'Disposition set' },
+  { value: 'support.call.started', label: 'Support call answered by AI' },
+  { value: 'support.call.handoff', label: 'Support call handed to a person' },
+  { value: 'support.call.completed', label: 'Support call finished' },
 ] as const;
 
 interface WebhookConfig {

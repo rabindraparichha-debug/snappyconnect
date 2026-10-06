@@ -10,7 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -130,6 +130,36 @@ class IvrSettingsDto {
   @IsOptional()
   @IsString()
   operatorUserId?: string;
+}
+
+class SupportSettingsDto {
+  /** The AI operator answers the support numbers first. */
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
+
+  /** Dialled numbers that are the support line. Empty = the board line. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  numbers?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  companyName?: string;
+
+  /** Spoken word for word when the AI picks up. Empty = the default. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  greeting?: string;
+
+  /** What the AI knows: products, hours, policies. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60000)
+  instructions?: string;
 }
 
 class RecordingSettingsDto {
@@ -319,6 +349,41 @@ export class NumbersController {
       ...(dto.operatorUserId !== undefined ? { operatorUserId: dto.operatorUserId } : {}),
     });
     return this.ivr();
+  }
+
+  // ----- Support line (AI operator first, then a person) -----
+
+  @Get('support')
+  async support() {
+    const [support, telnyx] = await Promise.all([
+      this.settings.getProviderSettings('support'),
+      this.settings.getProviderSettings('telnyx'),
+    ]);
+    return {
+      aiEnabled: Boolean(support.aiEnabled),
+      numbers: Array.isArray(support.numbers) ? support.numbers : [],
+      boardLineNumber: telnyx.boardLineNumber ?? null,
+      companyName: support.companyName ?? 'SnappyHires',
+      greeting: support.greeting ?? '',
+      instructions: support.instructions ?? '',
+      operatorUserId: telnyx.operatorUserId ?? null,
+      // Without a voice-platform key the AI cannot answer, whatever is saved.
+      aiAvailable: Boolean(process.env.VOICE_PLATFORM_KEY),
+    };
+  }
+
+  @Post('support')
+  async updateSupport(@Body() dto: SupportSettingsDto) {
+    await this.settings.updateProviderSettings('support', {
+      ...(dto.aiEnabled !== undefined ? { aiEnabled: dto.aiEnabled } : {}),
+      ...(dto.numbers !== undefined
+        ? { numbers: dto.numbers.map((n) => n.trim()).filter(Boolean) }
+        : {}),
+      ...(dto.companyName !== undefined ? { companyName: dto.companyName.trim() } : {}),
+      ...(dto.greeting !== undefined ? { greeting: dto.greeting.trim() } : {}),
+      ...(dto.instructions !== undefined ? { instructions: dto.instructions } : {}),
+    });
+    return this.support();
   }
 
   /** Give a user a menu digit (replacing whoever held it). */

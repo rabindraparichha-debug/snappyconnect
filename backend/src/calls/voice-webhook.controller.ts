@@ -8,6 +8,7 @@ import { TelnyxApiService } from '../providers/telnyx-api.service';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
 import { VoicemailsService } from '../voicemails/voicemails.service';
+import { SupportLineService } from './support-line.service';
 
 /**
  * Call Control webhook for the shared board line: answers, reads a menu, and
@@ -35,7 +36,10 @@ function ringSecondsFor(user: User): number {
   return Number.isFinite(secs) && secs >= 5 && secs <= 60 ? secs : 25;
 }
 
-function decodeState(clientState?: string): { vm?: string; leg?: string } | null {
+/** How long the AI operator has to pick up before a person is rung instead. */
+const AI_ANSWER_SECONDS = 15;
+
+function decodeState(clientState?: string): { vm?: string; leg?: string; ai?: string } | null {
   if (!clientState) return null;
   try {
     return JSON.parse(Buffer.from(clientState, 'base64').toString('utf8'));
@@ -61,6 +65,7 @@ export class VoiceWebhookController {
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly voicemails: VoicemailsService,
+    private readonly support: SupportLineService,
   ) {}
 
   @Public()
@@ -88,7 +93,12 @@ export class VoiceWebhookController {
           break;
 
         case 'call.answered':
-          if (isInbound) await this.playMenu(callControlId);
+          if (isInbound) {
+            // A support line with the AI operator switched on is answered by
+            // the AI; everything else gets the menu as before.
+            const handed = await this.sendToAiOperator(callControlId, payload?.from, payload?.to);
+            if (!handed) await this.playMenu(callControlId);
+          }
           break;
 
         // A recruiter picked up — the transfer succeeded, so no voicemail.
@@ -100,6 +110,26 @@ export class VoiceWebhookController {
         // so send them to that recruiter's voicemail instead of dropping them.
         case 'call.hangup': {
           const state = decodeState(payload?.client_state);
+
+          // Our state can ride on either leg's events; the leg it names is
+          // the caller's own.
+          const callersLeg = !state?.leg || state.leg === callControlId;
+
+          // The AI operator's leg ended. The caller's leg was parked rather
+          // than hung up, so decide here: end the call, or ring a person.
+          if (state?.ai && state.leg && !callersLeg) {
+            const next = await this.support.aiLegEnded(state.ai, this.bridged.has(callControlId));
+            this.bridged.delete(callControlId);
+            if (next.action === 'hangup') {
+              await this.telnyx.hangup(state.leg);
+            } else if (next.action === 'person') {
+              await this.handToPerson(state.leg, next.person, next.line);
+            }
+            break;
+          }
+
+          if (isInbound && callersLeg) await this.support.callerHungUp(callControlId);
+
           if (state?.vm && state.leg && !this.bridged.has(callControlId)) {
             const user = await this.usersRepo.findOne({ where: { id: state.vm } });
             if (user && !this.voicemailed.has(state.leg)) {
@@ -133,6 +163,7 @@ export class VoiceWebhookController {
                 ),
                 externalId: payload?.recording_id ?? callControlId,
               });
+              await this.support.noteVoicemail(callControlId, url);
             }
             this.voicemailed.delete(callControlId);
           }
@@ -157,6 +188,26 @@ export class VoiceWebhookController {
       this.logger.error(`Voice webhook ${type} failed: ${(err as Error).message}`);
     }
     return { received: true };
+  }
+
+  /**
+   * Hand the caller to the AI operator. False means the AI is off for this
+   * number or could not take the call, and the caller still needs the menu.
+   */
+  private async sendToAiOperator(callControlId: string, from?: string, to?: string): Promise<boolean> {
+    const ai = await this.support.announce(callControlId, from, to);
+    if (!ai) return false;
+    // Covers the couple of seconds it takes the AI to pick up.
+    await this.telnyx.speak(callControlId, 'Please hold for a moment.');
+    const handed = await this.telnyx.transferToSip(
+      callControlId,
+      ai.sipUri,
+      { username: ai.username, password: ai.password },
+      JSON.stringify({ ai: ai.taskId, leg: callControlId }),
+      AI_ANSWER_SECONDS,
+    );
+    if (!handed) await this.support.abandon(ai.taskId);
+    return handed;
   }
 
   private async playMenu(callControlId: string): Promise<void> {
@@ -218,6 +269,27 @@ export class VoiceWebhookController {
       boardNumber,
       operator ? JSON.stringify({ vm: operator.id, leg: callControlId }) : undefined,
       operator ? ringSecondsFor(operator) : 30,
+    );
+  }
+
+  /**
+   * After the AI operator: ring the team member the caller asked for by
+   * name, or the operator when nobody (or more than one person) matches.
+   */
+  private async handToPerson(callControlId: string, person?: string, boardNumber?: string) {
+    const target = person ? await this.support.findPerson(person) : null;
+    const destination = target ? destinationFor(target) : undefined;
+    if (!target || !destination) {
+      await this.transferToOperator(callControlId, boardNumber);
+      return;
+    }
+    await this.telnyx.speak(callControlId, `Connecting you to ${target.name}.`);
+    await this.telnyx.transfer(
+      callControlId,
+      destination,
+      boardNumber,
+      JSON.stringify({ vm: target.id, leg: callControlId }),
+      ringSecondsFor(target),
     );
   }
 

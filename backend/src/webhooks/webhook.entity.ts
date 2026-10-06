@@ -10,6 +10,12 @@ export enum WebhookEvent {
   CALL_COMPLETED = 'call.completed',
   SMS_RECEIVED = 'sms.received',
   DISPOSITION_SET = 'disposition.set',
+  /** Support line: the AI operator picked up a call. */
+  SUPPORT_CALL_STARTED = 'support.call.started',
+  /** Support line: the AI asked for a person, or ended the call. */
+  SUPPORT_CALL_HANDOFF = 'support.call.handoff',
+  /** Support line: summary, transcript and any voicemail are ready. */
+  SUPPORT_CALL_COMPLETED = 'support.call.completed',
 }
 
 @Entity('webhooks')

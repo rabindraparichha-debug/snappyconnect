@@ -261,6 +261,43 @@ export class TelnyxApiService {
     });
   }
 
+  /**
+   * Lend a call to a SIP endpoint (the AI operator). `park_after_unbridge`
+   * keeps the caller's leg alive when that endpoint hangs up, so the caller
+   * can then be rung through to a person instead of being cut off.
+   *
+   * Unlike the other commands this reports failure: the caller is waiting,
+   * and whoever asked must fall back to something else.
+   */
+  async transferToSip(
+    callControlId: string,
+    sipUri: string,
+    auth: { username: string; password: string },
+    clientState: string,
+    timeoutSecs = 15,
+  ): Promise<boolean> {
+    const state = Buffer.from(clientState).toString('base64');
+    try {
+      await this.request(`/calls/${encodeURIComponent(callControlId)}/actions/transfer`, {
+        method: 'POST',
+        body: {
+          to: sipUri,
+          sip_auth_username: auth.username,
+          sip_auth_password: auth.password,
+          timeout_secs: timeoutSecs,
+          park_after_unbridge: 'self',
+          // Carried on the new leg's events, which is where it is read.
+          client_state: state,
+          target_leg_client_state: state,
+        },
+      });
+      return true;
+    } catch (err) {
+      this.logger.warn(`Call Control transfer to SIP failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   async hangup(callControlId: string): Promise<void> {
     await this.command(callControlId, 'hangup', {});
   }
