@@ -55,6 +55,12 @@ export class VoiceWebhookController {
 
   /** Legs that reached a recruiter, and legs already taking a message. */
   private readonly bridged = new Set<string>();
+  /**
+   * Callers' own legs. Only `call.initiated` says which way a call is going;
+   * `call.answered` and `call.hangup` carry no direction, so the leg is
+   * remembered here from the moment it arrives.
+   */
+  private readonly inboundLegs = new Map<string, number>();
   /** Leg → the recruiter whose mailbox is recording, so the finished
    * recording can be filed against the right person. */
   private readonly voicemailed = new Map<string, { userId: string; at: number }>();
@@ -84,7 +90,13 @@ export class VoiceWebhookController {
     }
 
     // Only inbound legs run the menu; our own transfer legs must pass through.
-    const isInbound = payload?.direction === 'incoming';
+    if (type === 'call.initiated' && payload?.direction === 'incoming') {
+      this.inboundLegs.set(callControlId, Date.now());
+    }
+    for (const [leg, at] of this.inboundLegs) {
+      if (at < staleBefore) this.inboundLegs.delete(leg);
+    }
+    const isInbound = payload?.direction === 'incoming' || this.inboundLegs.has(callControlId);
 
     try {
       switch (type) {
@@ -128,7 +140,10 @@ export class VoiceWebhookController {
             break;
           }
 
-          if (isInbound && callersLeg) await this.support.callerHungUp(callControlId);
+          if (isInbound && callersLeg) {
+            this.inboundLegs.delete(callControlId);
+            await this.support.callerHungUp(callControlId);
+          }
 
           if (state?.vm && state.leg && !this.bridged.has(callControlId)) {
             const user = await this.usersRepo.findOne({ where: { id: state.vm } });

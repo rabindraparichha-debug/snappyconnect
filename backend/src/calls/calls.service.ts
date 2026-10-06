@@ -552,7 +552,8 @@ export class CallsService {
       ? await this.usersRepo
           .createQueryBuilder('user')
           .where(
-            `regexp_replace(coalesce(user."providerConfig" ->> 'telnyxNumber', ''), '\\D', '', 'g') = :digits`,
+            // "user" is a reserved word in Postgres: unquoted, the query is a syntax error.
+            `regexp_replace(coalesce("user"."providerConfig" ->> 'telnyxNumber', ''), '\\D', '', 'g') = :digits`,
             { digits },
           )
           .getOne()
