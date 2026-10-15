@@ -208,6 +208,15 @@ take a call, or its leg ends without saying how, a person is rung; a caller is
 never dropped because the AI had a problem. With the switch off, or for any
 other number, the menu answers as before.
 
+The UAE SIM works the same way, switched on separately ("AI operator also
+answers the UAE SIM"). The Dubai PBX's dialplan (`deploy/asterisk-support-line.sh`)
+asks `POST /webhooks/asterisk-support/announce` in plain text, dials the voice
+platform's bridge for the call, and asks `.../after/{taskId}` what to do with the
+caller once the AI leg ends: `hangup`, `exten:2001` (the person asked for, or
+the operator's UAE extension) or `ring` (everyone, as before). An empty answer
+at any step means the old behaviour. The PBX authenticates with
+`X-Support-Key` = `ASTERISK_SUPPORT_KEY`.
+
 Three events follow one call, each carrying the whole call so far (treat
 `data.id` as the key and merge):
 
