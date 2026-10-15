@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
-import { CallDirection, CallSource, CallStatus, CallingProvider, UserStatus } from '../common/enums';
+import { CallDirection, CallSource, CallStatus, CallingProvider, Region, UserStatus } from '../common/enums';
 import { guessRegion } from '../common/region.util';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../users/user.entity';
@@ -16,9 +16,14 @@ import { AfterAi, SupportConfig, afterAiLeg, isSupportNumber, matchPerson } from
 export interface AiOperatorLeg {
   taskId: string;
   sipUri: string;
+  /** The user part of `sipUri`: what a PBX dials to reach this call's agent. */
+  ref: string;
   username: string;
   password: string;
 }
+
+/** Where a support call came in: the Telnyx board line, or the UAE SIM through Asterisk. */
+export type SupportLine = { provider: 'telnyx'; to?: string } | { provider: 'asterisk'; to?: string };
 
 /**
  * The support line: an AI operator answers first, then a person takes over.
@@ -62,6 +67,8 @@ export class SupportLineService {
           : [];
     return {
       aiEnabled: Boolean(support.aiEnabled),
+      // The UAE SIM: every call the Dubai PBX hands us is a support call when this is on.
+      uaeEnabled: Boolean(support.uaeEnabled),
       numbers,
       companyName: support.companyName || 'SnappyHires',
       greeting: support.greeting || '',
@@ -75,22 +82,29 @@ export class SupportLineService {
    * Ask the AI operator to take this call. Returns where to send the caller,
    * or null when the AI should not or cannot take it — the usual menu runs.
    */
-  async announce(callerLeg: string, from?: string, to?: string): Promise<AiOperatorLeg | null> {
+  async announce(
+    callerLeg: string,
+    from?: string,
+    line: SupportLine = { provider: 'telnyx' },
+  ): Promise<AiOperatorLeg | null> {
     const cfg = await this.getConfig();
-    if (!cfg.aiEnabled || !cfg.aiAvailable || !isSupportNumber(cfg.numbers, to)) return null;
+    const to = line.to;
+    const wanted =
+      line.provider === 'asterisk' ? cfg.uaeEnabled : cfg.aiEnabled && isSupportNumber(cfg.numbers, to);
+    if (!wanted || !cfg.aiAvailable) return null;
 
     const taskId = `sup-${randomUUID()}`;
     const log = await this.callLogs.save(
       this.callLogs.create({
         userId: cfg.operatorUserId,
         phoneNumber: from || 'Unknown',
-        provider: CallingProvider.TELNYX,
+        provider: line.provider === 'asterisk' ? CallingProvider.ASTERISK : CallingProvider.TELNYX,
         direction: CallDirection.INBOUND,
         status: CallStatus.IN_PROGRESS,
         source: CallSource.API,
         startedAt: new Date(),
-        region: guessRegion(to ?? ''),
-        metadata: { support: true, ai: true, taskId, callerLeg, line: to ?? null },
+        region: line.provider === 'asterisk' ? Region.UAE : guessRegion(to ?? ''),
+        metadata: { support: true, ai: true, taskId, callerLeg, line: to ?? null, via: line.provider },
       }),
     );
 
@@ -127,6 +141,7 @@ export class SupportLineService {
       return {
         taskId,
         sipUri: body.sip_uri,
+        ref: body.sip_uri.replace(/^sip:/, '').split('@')[0],
         username: body.sip_username,
         password: body.sip_password,
       };
@@ -174,6 +189,18 @@ export class SupportLineService {
       await this.callLogs.save(log);
     }
     return { ...next, line: log?.metadata?.line ?? undefined };
+  }
+
+  /**
+   * Where the Dubai PBX should send the caller after the AI leg. Extensions
+   * come from the user's UAE line; with none, the whole team rings as before.
+   */
+  async nextExtension(person?: string): Promise<{ action: 'hangup' | 'ring' | 'exten'; exten?: string }> {
+    const target = person ? await this.findPerson(person) : null;
+    const cfg = await this.getConfig();
+    const operator = cfg.operatorUserId ? await this.usersRepo.findOne({ where: { id: cfg.operatorUserId } }) : null;
+    const exten = target?.providerConfig?.sipUsername ?? operator?.providerConfig?.sipUsername;
+    return exten ? { action: 'exten', exten: String(exten) } : { action: 'ring' };
   }
 
   /** The team member a caller asked for by name, if exactly one matches. */

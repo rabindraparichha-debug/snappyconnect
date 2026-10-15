@@ -138,6 +138,11 @@ class SupportSettingsDto {
   @IsBoolean()
   aiEnabled?: boolean;
 
+  /** The AI operator also answers calls to the UAE SIM. */
+  @IsOptional()
+  @IsBoolean()
+  uaeEnabled?: boolean;
+
   /** Dialled numbers that are the support line. Empty = the board line. */
   @IsOptional()
   @IsArray()
@@ -361,6 +366,7 @@ export class NumbersController {
     ]);
     return {
       aiEnabled: Boolean(support.aiEnabled),
+      uaeEnabled: Boolean(support.uaeEnabled),
       numbers: Array.isArray(support.numbers) ? support.numbers : [],
       boardLineNumber: telnyx.boardLineNumber ?? null,
       companyName: support.companyName ?? 'SnappyHires',
@@ -376,6 +382,7 @@ export class NumbersController {
   async updateSupport(@Body() dto: SupportSettingsDto) {
     await this.settings.updateProviderSettings('support', {
       ...(dto.aiEnabled !== undefined ? { aiEnabled: dto.aiEnabled } : {}),
+      ...(dto.uaeEnabled !== undefined ? { uaeEnabled: dto.uaeEnabled } : {}),
       ...(dto.numbers !== undefined
         ? { numbers: dto.numbers.map((n) => n.trim()).filter(Boolean) }
         : {}),

@@ -210,7 +210,7 @@ export class VoiceWebhookController {
    * number or could not take the call, and the caller still needs the menu.
    */
   private async sendToAiOperator(callControlId: string, from?: string, to?: string): Promise<boolean> {
-    const ai = await this.support.announce(callControlId, from, to);
+    const ai = await this.support.announce(callControlId, from, { provider: 'telnyx', to });
     if (!ai) return false;
     // Covers the couple of seconds it takes the AI to pick up.
     await this.telnyx.speak(callControlId, 'Please hold for a moment.');

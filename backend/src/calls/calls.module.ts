@@ -17,6 +17,7 @@ import { CallLimitsService } from './call-limits.service';
 import { RecordingsService } from './recordings.service';
 import { SupportLineService } from './support-line.service';
 import { VoicemailsModule } from '../voicemails/voicemails.module';
+import { AsteriskSupportController } from './asterisk-support.controller';
 import { VoiceWebhookController } from './voice-webhook.controller';
 import { WebhooksController } from './webhooks.controller';
 
@@ -32,7 +33,7 @@ import { WebhooksController } from './webhooks.controller';
     DncModule,
     UsersModule,
   ],
-  controllers: [CallsController, WebhooksController, VoiceWebhookController],
+  controllers: [CallsController, WebhooksController, VoiceWebhookController, AsteriskSupportController],
   providers: [CallLimitsService, CallsService, RecordingsService, SupportLineService],
   exports: [CallsService, RecordingsService, CallLimitsService, SupportLineService],
 })

@@ -6,6 +6,7 @@ import { Button, Card } from '@/components/ui';
 
 interface SupportConfig {
   aiEnabled: boolean;
+  uaeEnabled: boolean;
   numbers: string[];
   boardLineNumber: string | null;
   companyName: string;
@@ -25,6 +26,7 @@ const FIELD =
 export function SupportLineCard() {
   const [config, setConfig] = useState<SupportConfig | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [uaeEnabled, setUaeEnabled] = useState(false);
   const [numbers, setNumbers] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [greeting, setGreeting] = useState('');
@@ -36,6 +38,7 @@ export function SupportLineCard() {
   function show(next: SupportConfig) {
     setConfig(next);
     setAiEnabled(next.aiEnabled);
+    setUaeEnabled(next.uaeEnabled);
     setNumbers(next.numbers.join('\n'));
     setCompanyName(next.companyName);
     setGreeting(next.greeting);
@@ -57,6 +60,7 @@ export function SupportLineCard() {
           method: 'POST',
           body: {
             aiEnabled,
+            uaeEnabled,
             numbers: numbers.split(/[\n,]/).map((n) => n.trim()).filter(Boolean),
             companyName,
             greeting,
@@ -108,6 +112,15 @@ export function SupportLineCard() {
           className="h-4 w-4 rounded border-slate-300"
         />
         AI operator answers first
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+        <input
+          type="checkbox"
+          checked={uaeEnabled}
+          onChange={(e) => setUaeEnabled(e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300"
+        />
+        AI operator also answers the UAE SIM (calls from the Dubai office line)
       </label>
       {!config.aiAvailable && (
         <p className="mt-1 text-xs text-amber-600">

@@ -7,6 +7,8 @@
 export interface SupportConfig {
   /** The AI operator answers support numbers first. Off = the usual menu. */
   aiEnabled: boolean;
+  /** The AI operator also answers calls to the UAE SIM. Off = everyone rings. */
+  uaeEnabled: boolean;
   /** Dialled numbers that count as the support line. */
   numbers: string[];
   companyName: string;
