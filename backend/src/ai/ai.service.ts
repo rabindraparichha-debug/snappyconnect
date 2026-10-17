@@ -1,5 +1,8 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
+import { KeysVaultService, verdictOf } from '../keys-vault/keys-vault.service';
+
+type Endpoint = { key: string; baseUrl: string; model: string };
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -23,50 +26,74 @@ Keep responses concise, professional, and actionable. When asked about call data
 export class AiService {
   private readonly logger = new Logger(AiService.name);
 
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    @Optional() private readonly vault?: KeysVaultService,
+  ) {}
+
+  /**
+   * Endpoints in fail-over order: the central vault's OpenAI-compatible
+   * endpoints (custom_llm, with their own base URL and model), then its
+   * OPENAI_API_KEY keys, then the key saved in Settings → AI Assistant.
+   */
+  private async endpoints(): Promise<Endpoint[]> {
+    const settings = await this.settingsService.getProviderSettings('ai' as any);
+    const storedBase = settings?.baseUrl || 'https://api.openai.com/v1';
+    const storedModel = settings?.model || 'gpt-4o-mini';
+    const openAiModel = /api\.openai\.com/.test(storedBase) ? storedModel : 'gpt-4o-mini';
+    const list: Endpoint[] = [];
+    for (const k of this.vault?.byProvider('custom_llm') ?? []) {
+      const base = typeof k.config.base_url === 'string' ? k.config.base_url.replace(/\/+$/, '') : '';
+      const model = typeof k.config.model === 'string' ? k.config.model : '';
+      if (base && model) list.push({ key: k.secret, baseUrl: base, model });
+    }
+    for (const k of this.vault?.pool('OPENAI_API_KEY') ?? []) list.push({ key: k.secret, baseUrl: 'https://api.openai.com/v1', model: openAiModel });
+    if (settings?.apiKey && !list.some((e) => e.key === settings.apiKey)) list.push({ key: settings.apiKey, baseUrl: storedBase, model: storedModel });
+    return list;
+  }
 
   async chat(messages: ChatMessage[]): Promise<{ reply: string }> {
-    const settings = await this.settingsService.getProviderSettings('ai' as any);
-    const apiKey = settings?.apiKey;
-    const model = settings?.model || 'gpt-4o-mini';
-    const baseUrl = settings?.baseUrl || 'https://api.openai.com/v1';
-
-    if (!apiKey) {
+    const endpoints = await this.endpoints();
+    if (endpoints.length === 0) {
       throw new BadRequestException(
         'AI is not configured. An admin needs to add an API key in Settings → AI Assistant.',
       );
     }
 
-    const body = {
-      model,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-      max_tokens: 1024,
-      temperature: 0.7,
-    };
-
-    try {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        this.logger.error(`AI API error (${res.status}): ${err}`);
-        throw new BadRequestException('AI service returned an error. Check your API key and model settings.');
+    // Each key in turn: a rejected, out-of-credit or rate-limited key hands the
+    // question to the next one; a provider outage stops here (another key on
+    // the same provider would fail the same way).
+    for (const ep of endpoints) {
+      let res: Response;
+      try {
+        res = await fetch(`${ep.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key}` },
+          body: JSON.stringify({
+            model: ep.model,
+            messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+            max_tokens: 1024,
+            temperature: 0.7,
+          }),
+        });
+      } catch (err) {
+        this.vault?.report(ep.key, { ok: false, error: err });
+        this.logger.error('AI API request failed', err);
+        throw new BadRequestException('Failed to reach AI service. Check your API configuration.');
       }
 
-      const data = await res.json();
-      const reply = data?.choices?.[0]?.message?.content ?? 'No response from AI.';
-      return { reply };
-    } catch (err) {
-      if (err instanceof BadRequestException) throw err;
-      this.logger.error('AI API request failed', err);
-      throw new BadRequestException('Failed to reach AI service. Check your API configuration.');
+      if (res.ok) {
+        const data = await res.json();
+        this.vault?.report(ep.key, { ok: true, model: ep.model, inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens });
+        return { reply: data?.choices?.[0]?.message?.content ?? 'No response from AI.' };
+      }
+
+      const errText = await res.text();
+      const error = Object.assign(new Error(errText.slice(0, 300)), { status: res.status });
+      this.vault?.report(ep.key, { ok: false, error });
+      this.logger.error(`AI API error (${res.status}): ${errText.slice(0, 500)}`);
+      if (verdictOf(error) === 'error') break;
     }
+    throw new BadRequestException('AI service returned an error. Check your API key and model settings.');
   }
 }

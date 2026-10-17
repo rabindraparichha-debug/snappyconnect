@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { decryptString, encryptString } from '../common/crypto.util';
 import { Setting } from './setting.entity';
+import { KeysVaultService } from '../keys-vault/keys-vault.service';
 
 export const PROVIDER_SETTING_KEYS = ['telnyx', 'grandstream', 'dinstar', 'asterisk', 'ai', 'limits', 'support'] as const;
 export type ProviderSettingKey = (typeof PROVIDER_SETTING_KEYS)[number];
@@ -21,12 +22,28 @@ export class SettingsService {
     @InjectRepository(Setting)
     private readonly settingsRepo: Repository<Setting>,
     config: ConfigService,
+    @Optional() private readonly vault?: KeysVaultService,
   ) {
     this.encryptionKey = config.get<string>('SETTINGS_ENCRYPTION_KEY', 'dev-settings-key');
   }
 
-  /** Decrypted settings object for internal (provider) use. */
+  /**
+   * Decrypted settings object for internal (provider) use, with the central
+   * keys vault (Snappy Care → Keys & health) laid over it: the vault's primary
+   * TELNYX_API_KEY replaces telnyx.apiKey. The AI key is handled by AiService,
+   * which tries every key in order. Nothing from the vault is ever saved.
+   */
   async getProviderSettings(key: ProviderSettingKey): Promise<Record<string, any>> {
+    const stored = await this.readStored(key);
+    if (key === 'telnyx' && this.vault) {
+      const primary = this.vault.pool('TELNYX_API_KEY')[0];
+      if (primary) return { ...stored, apiKey: primary.secret };
+    }
+    return stored;
+  }
+
+  /** What is saved in the database for a namespace — never the vault's keys. */
+  private async readStored(key: ProviderSettingKey): Promise<Record<string, any>> {
     const row = await this.settingsRepo.findOne({ where: { key } });
     if (!row) return {};
     try {
@@ -71,7 +88,9 @@ export class SettingsService {
         `Unknown settings key "${key}". Valid keys: ${PROVIDER_SETTING_KEYS.join(', ')}`,
       );
     }
-    const current = await this.getProviderSettings(key as ProviderSettingKey);
+    // Merge into what is STORED, so a vault key shown in the admin UI is never
+    // written into the database when an admin saves other fields.
+    const current = await this.readStored(key as ProviderSettingKey);
     const next: Record<string, any> = { ...current };
 
     for (const [field, value] of Object.entries(incoming)) {

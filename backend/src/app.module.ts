@@ -29,10 +29,12 @@ import { ContactListsModule } from './contact-lists/contact-lists.module';
 import { DncModule } from './dnc/dnc.module';
 import { UniverseModule } from './universe/universe.module';
 import { UsersModule } from './users/users.module';
+import { KeysVaultModule } from './keys-vault/keys-vault.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    KeysVaultModule,
     // Blanket limit for the API. Individual routes tighten this with
     // @Throttle (login) or opt out with @SkipThrottle (provider webhooks).
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
