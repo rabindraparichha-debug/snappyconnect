@@ -13,7 +13,7 @@ const dir = mkdtempSync(path.join(tmpdir(), 'kv-'));
 const cacheFile = path.join(dir, '.keys-vault.enc');
 const seen: { url: string; key: string; body?: any }[] = [];
 
-function installFetch(opts: { hubDown?: boolean } = {}) {
+function installFetch(opts: { hubDown?: boolean; usageDown?: boolean; backupModel?: string } = {}) {
   (globalThis as any).fetch = async (url: string, init?: any) => {
     const key = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '').replace('Bearer ', '');
     seen.push({ url, key, body: init?.body ? JSON.parse(init.body) : undefined });
@@ -22,10 +22,13 @@ function installFetch(opts: { hubDown?: boolean } = {}) {
       return new Response(JSON.stringify({ refresh_seconds: 300, keys: {
         OPENAI_API_KEY: [
           { id: 'k1', provider: 'openai', label: 'Main', secret: 'sk-bad', config: {} },
-          { id: 'k2', provider: 'openai', label: 'Backup', secret: 'sk-good', config: {} },
+          { id: 'k2', provider: 'openai', label: 'Backup', secret: 'sk-good', config: opts.backupModel ? { model: opts.backupModel } : {} },
         ],
         TELNYX_API_KEY: [{ id: 't1', provider: 'telnyx', label: 'Calls', secret: 'KEY-vault', config: {} }],
       } }), { status: 200 });
+    }
+    if (url.includes('/api/platform-keys/v1/usage')) {
+      if (opts.usageDown) return new Response('down', { status: 503 });
     }
     if (url.includes('/api/platform-keys/v1/usage')) return new Response('{"accepted":1}', { status: 200 });
     if (key === 'sk-bad') return new Response('{"error":{"message":"Incorrect API key"}}', { status: 401 });
@@ -75,6 +78,41 @@ describe('KeysVaultService', () => {
   });
 });
 
+describe('wants + task names', () => {
+  beforeEach(() => { seen.length = 0; installFetch(); rmSync(cacheFile, { force: true }); });
+
+  it('sends every name asked for, sorted, de-duplicated and URL-encoded', async () => {
+    const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
+    await v.fetchNow();
+    assert.ok(seen[0].url.endsWith('/api/platform-keys/v1/keys?wants=OPENAI_API_KEY,TELNYX_API_KEY'));
+    v.key('ZED_KEY', 'own'); v.keys('A B'); v.pool('ZED_KEY');
+    seen.length = 0;
+    await v.fetchNow();
+    assert.ok(seen[0].url.endsWith('?wants=A%20B,OPENAI_API_KEY,TELNYX_API_KEY,ZED_KEY'));
+  });
+
+  it('keeps usage per task and retries it after a failed report', async () => {
+    const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
+    await v.fetchNow();
+    v.report('sk-good', { ok: true, model: 'gpt-4o-mini', inputTokens: 5 }, 'assistant_chat');
+    v.report('sk-good', { ok: true, model: 'gpt-4o-mini', inputTokens: 7 }, 'other_task');
+    v.report('sk-good', { ok: true, model: 'gpt-4o-mini', inputTokens: 1 }, 'Bad Task!');
+    installFetch({ usageDown: true });
+    await v.flushUsage();
+    v.report('sk-good', { ok: true, model: 'gpt-4o-mini', inputTokens: 5 }, 'assistant_chat');
+    installFetch();
+    seen.length = 0;
+    await v.flushUsage();
+    const reports = seen.find((s) => s.url.endsWith('/usage'))!.body.reports;
+    assert.equal(reports.length, 3);
+    const chat = reports.find((r: any) => r.task === 'assistant_chat');
+    assert.equal(chat.calls, 2);
+    assert.equal(chat.input_tokens, 10);
+    assert.equal(reports.find((r: any) => r.task === 'other_task').calls, 1);
+    assert.ok(reports.some((r: any) => !('task' in r)));
+  });
+});
+
 describe('settings overlay', () => {
   beforeEach(() => { seen.length = 0; installFetch(); rmSync(cacheFile, { force: true }); });
 
@@ -109,6 +147,23 @@ describe('AI fail-over', () => {
     const reports = seen.find((s) => s.url.endsWith('/usage'))!.body.reports;
     assert.equal(reports.find((r: any) => r.key_id === 'k1').status, 'invalid');
     assert.equal(reports.find((r: any) => r.key_id === 'k2').input_tokens, 10);
+  });
+
+  it('a vault key with its own model uses it; one without keeps the code\'s; cost follows the model used', async () => {
+    installFetch({ backupModel: 'gpt-4o' });
+    const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
+    await v.fetchNow();
+    const { svc } = settingsWith(v, { ai: { apiKey: 'sk-stored', model: 'gpt-4o-mini' } });
+    seen.length = 0;
+    await new AiService(svc, v).chat([{ role: 'user', content: 'hi' }]);
+    assert.equal(seen[0].body.model, 'gpt-4o-mini');
+    assert.equal(seen[1].body.model, 'gpt-4o');
+    await v.flushUsage();
+    const reports = seen.find((s) => s.url.endsWith('/usage'))!.body.reports;
+    const k2 = reports.find((r: any) => r.key_id === 'k2');
+    assert.equal(k2.task, 'assistant_chat');
+    assert.equal(reports.find((r: any) => r.key_id === 'k1').task, 'assistant_chat');
+    assert.equal(k2.cost_usd, Number(((10 * 2.5 + 2 * 10) / 1_000_000).toFixed(6)));
   });
 
   it('a provider outage does not burn the next key', async () => {

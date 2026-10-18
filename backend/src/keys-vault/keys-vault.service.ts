@@ -16,7 +16,13 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
  *     folders (default /opt/snappyconnect/.keys-vault.enc — deploys rsync only
  *     backend/ and web/), AES-256-GCM encrypted with a key derived from the token;
  *   • reports calls / errors / tokens / cost / the provider's verdict per key
- *     back to the hub once a minute.
+ *     and per task (e.g. assistant_chat) back to the hub once a minute;
+ *   • tells the hub which variable names this code asks for (?wants=), so the
+ *     dashboard can show what SnappyConnect would use.
+ *
+ * A vault AI key may carry config.model — the model the super admin chose for
+ * that key. Calls made with that key use it (see modelFor); keys without one
+ * keep the code's model.
  *
  * Covers third-party PROVIDER keys only: the AI key (with fail-over) and the
  * Telnyx API key (primary only — Telnyx connections and numbers belong to one
@@ -36,13 +42,22 @@ export interface VaultKey {
 }
 
 type Snapshot = { fetchedAt: number; refreshSeconds: number; keys: Record<string, VaultKey[]> };
-type Tally = { calls: number; errors: number; cost: number; inTok: number; outTok: number; status?: string; detail?: string };
+type Tally = { task: string; calls: number; errors: number; cost: number; inTok: number; outTok: number; status?: string; detail?: string };
 
 export type KeyOutcome =
   | { ok: true; model: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
   | { ok: false; error: unknown };
 
 /** USD per million tokens for the models SnappyConnect calls (published rates). */
+/** Variable names SnappyConnect's code reads from the vault even before it first asks. */
+const STATIC_WANTS = ['TELNYX_API_KEY', 'OPENAI_API_KEY'];
+
+/** The hub's task-name rule: lower-case [a-z0-9_.:-], at most 40 characters; '' when unusable. */
+export function cleanTask(task: string | undefined): string {
+  const t = (task ?? '').trim().toLowerCase();
+  return /^[a-z0-9_.:-]{1,40}$/.test(t) ? t : '';
+}
+
 const PRICES: Record<string, { in: number; out: number }> = {
   'gpt-4o': { in: 2.5, out: 10 },
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
@@ -71,6 +86,7 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
   private refreshTimer: NodeJS.Timeout | null = null;
   private flushTimer: NodeJS.Timeout | null = null;
   private pending = new Map<string, Tally>();
+  private readonly wanted = new Set<string>(STATIC_WANTS);
 
   constructor(private config: ConfigService) {
     this.base = (this.config.get<string>('KEYS_VAULT_URL') ?? 'https://hire.snappyhires.com').replace(/\/+$/, '');
@@ -139,7 +155,7 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
   async fetchNow(): Promise<void> {
     if (!this.enabled()) return;
     try {
-      const res = await fetch(`${this.base}/api/platform-keys/v1/keys`, {
+      const res = await fetch(`${this.base}/api/platform-keys/v1/keys${this.wantsQuery()}`, {
         headers: { Authorization: `Bearer ${this.token}` },
         signal: AbortSignal.timeout(10_000),
       });
@@ -158,9 +174,21 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** `?wants=A,B` — every name the code has asked for, sorted, at most 100. */
+  private wantsQuery(): string {
+    const names = [...this.wanted].sort().slice(0, 100);
+    return names.length ? `?wants=${names.map(encodeURIComponent).join(',')}` : '';
+  }
+
+  /** Records variable names the code reads, so the next fetch tells the hub. */
+  want(...envNames: string[]): void {
+    for (const n of envNames) if (n && n.trim()) this.wanted.add(n.trim());
+  }
+
   // ── Accessors ─────────────────────────────────────────────────────────────
   /** Vault keys for one variable name, in the dashboard's order. */
   pool(envName: string): VaultKey[] {
+    this.want(envName);
     return this.enabled() ? (this.snapshot?.keys[envName] ?? []) : [];
   }
 
@@ -182,17 +210,32 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
     return Object.values(this.snapshot?.keys ?? {}).flat().filter((k) => k.provider === provider);
   }
 
+  /** The model the super admin set on this vault key (config.model), else the code's. */
+  modelFor(secret: string, fallback: string): string {
+    for (const list of Object.values(this.snapshot?.keys ?? {})) {
+      for (const k of list) {
+        if (k.secret !== secret) continue;
+        const m = typeof k.config.model === 'string' ? k.config.model.trim() : '';
+        return m || fallback;
+      }
+    }
+    return fallback;
+  }
+
   idOf(secret: string): string | null {
     for (const list of Object.values(this.snapshot?.keys ?? {})) for (const k of list) if (k.secret === secret) return k.id;
     return null;
   }
 
   // ── Usage reporting ───────────────────────────────────────────────────────
-  report(secret: string, outcome: KeyOutcome): void {
+  /** Tallies one call with a vault key; `task` names the operation (e.g. assistant_chat). */
+  report(secret: string, outcome: KeyOutcome, task?: string): void {
     const id = this.idOf(secret);
     if (!id) return;
     const day = new Date().toISOString().slice(0, 10);
-    const t = this.pending.get(`${id}|${day}`) ?? { calls: 0, errors: 0, cost: 0, inTok: 0, outTok: 0 };
+    const name = cleanTask(task);
+    const slot = `${id}|${day}|${name}`;
+    const t = this.pending.get(slot) ?? { task: name, calls: 0, errors: 0, cost: 0, inTok: 0, outTok: 0 };
     t.calls += 1;
     if (outcome.ok) {
       const p = PRICES[outcome.model];
@@ -211,7 +254,7 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
         t.detail = (outcome.error instanceof Error ? outcome.error.message : String(outcome.error)).slice(0, 200);
       }
     }
-    this.pending.set(`${id}|${day}`, t);
+    this.pending.set(slot, t);
   }
 
   async flushUsage(): Promise<void> {
@@ -223,6 +266,7 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
       return {
         key_id, day, calls: t.calls, errors: t.errors, cost_usd: Number(t.cost.toFixed(6)),
         input_tokens: t.inTok, output_tokens: t.outTok,
+        ...(t.task ? { task: t.task } : {}),
         ...(t.status ? { status: t.status, status_detail: t.detail } : {}),
       };
     });
@@ -248,15 +292,15 @@ export class KeysVaultService implements OnModuleInit, OnModuleDestroy {
    * credit and rate-limited keys give way to the next; any other error (the
    * provider is down, a bad request) is thrown at once.
    */
-  async withKeys<T>(keys: string[], call: (key: string) => Promise<T>, usage: (result: T) => { model: string; inputTokens?: number; outputTokens?: number; costUsd?: number }): Promise<T> {
+  async withKeys<T>(keys: string[], call: (key: string) => Promise<T>, usage: (result: T) => { model: string; inputTokens?: number; outputTokens?: number; costUsd?: number }, task?: string): Promise<T> {
     let last: unknown = new Error('No API key configured');
     for (const key of keys) {
       try {
         const result = await call(key);
-        this.report(key, { ok: true, ...usage(result) });
+        this.report(key, { ok: true, ...usage(result) }, task);
         return result;
       } catch (err) {
-        this.report(key, { ok: false, error: err });
+        this.report(key, { ok: false, error: err }, task);
         last = err;
         if (verdictOf(err) === 'error') throw err;
       }
