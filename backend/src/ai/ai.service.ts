@@ -4,6 +4,9 @@ import { KeysVaultService, verdictOf } from '../keys-vault/keys-vault.service';
 
 type Endpoint = { key: string; baseUrl: string; model: string };
 
+/** Task names reported to the keys vault, one per AiService operation. */
+const TASK_CHAT = 'assistant_chat';
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -35,6 +38,8 @@ export class AiService {
    * Endpoints in fail-over order: the central vault's OpenAI-compatible
    * endpoints (custom_llm, with their own base URL and model), then its
    * OPENAI_API_KEY keys, then the key saved in Settings → AI Assistant.
+   * A vault key with config.model set uses that model; one without keeps the
+   * code's (Settings → AI Assistant model, else gpt-4o-mini).
    */
   private async endpoints(): Promise<Endpoint[]> {
     const settings = await this.settingsService.getProviderSettings('ai' as any);
@@ -47,7 +52,7 @@ export class AiService {
       const model = typeof k.config.model === 'string' ? k.config.model : '';
       if (base && model) list.push({ key: k.secret, baseUrl: base, model });
     }
-    for (const k of this.vault?.pool('OPENAI_API_KEY') ?? []) list.push({ key: k.secret, baseUrl: 'https://api.openai.com/v1', model: openAiModel });
+    for (const k of this.vault?.pool('OPENAI_API_KEY') ?? []) list.push({ key: k.secret, baseUrl: 'https://api.openai.com/v1', model: this.vault!.modelFor(k.secret, openAiModel) });
     if (settings?.apiKey && !list.some((e) => e.key === settings.apiKey)) list.push({ key: settings.apiKey, baseUrl: storedBase, model: storedModel });
     return list;
   }
@@ -77,20 +82,20 @@ export class AiService {
           }),
         });
       } catch (err) {
-        this.vault?.report(ep.key, { ok: false, error: err });
+        this.vault?.report(ep.key, { ok: false, error: err }, TASK_CHAT);
         this.logger.error('AI API request failed', err);
         throw new BadRequestException('Failed to reach AI service. Check your API configuration.');
       }
 
       if (res.ok) {
         const data = await res.json();
-        this.vault?.report(ep.key, { ok: true, model: ep.model, inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens });
+        this.vault?.report(ep.key, { ok: true, model: ep.model, inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens }, TASK_CHAT);
         return { reply: data?.choices?.[0]?.message?.content ?? 'No response from AI.' };
       }
 
       const errText = await res.text();
       const error = Object.assign(new Error(errText.slice(0, 300)), { status: res.status });
-      this.vault?.report(ep.key, { ok: false, error });
+      this.vault?.report(ep.key, { ok: false, error }, TASK_CHAT);
       this.logger.error(`AI API error (${res.status}): ${errText.slice(0, 500)}`);
       if (verdictOf(error) === 'error') break;
     }
