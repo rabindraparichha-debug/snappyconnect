@@ -61,6 +61,15 @@ export function cleanTask(task: string | undefined): string {
 const PRICES: Record<string, { in: number; out: number }> = {
   'gpt-4o': { in: 2.5, out: 10 },
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
+  'gpt-6-luna': { in: 0.1, out: 0.5 },
+  'gpt-6-sol': { in: 2, out: 10 },
+  'gpt-6.1-sol': { in: 2, out: 10 },
+  'gpt-6-astra': { in: 10, out: 50 },
+  'gpt-5.6-luna': { in: 0.2, out: 1.2 },
+  'gpt-5-nano': { in: 0.05, out: 0.4 },
+  'gpt-5-mini': { in: 0.25, out: 2 },
+  'gpt-4.1-mini': { in: 0.4, out: 1.6 },
+  'gpt-4.1': { in: 2, out: 8 },
   'deepseek-chat': { in: 0.27, out: 1.1 },
   'gemini-2.5-flash': { in: 0.3, out: 2.5 },
 };
