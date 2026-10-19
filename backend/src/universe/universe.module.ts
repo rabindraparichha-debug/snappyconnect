@@ -5,11 +5,12 @@ import { DncModule } from '../dnc/dnc.module';
 import { User } from '../users/user.entity';
 import { Voicemail } from '../voicemails/voicemail.entity';
 import { CarePeopleService } from './care-people.service';
+import { UniverseCallsController } from './universe-calls.controller';
 import { UniversePeopleController } from './universe-people.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([CallLog, User, Voicemail]), DncModule],
-  controllers: [UniversePeopleController],
+  controllers: [UniversePeopleController, UniverseCallsController],
   providers: [CarePeopleService],
 })
 export class UniverseModule {}
