@@ -13,9 +13,11 @@ const dir = mkdtempSync(path.join(tmpdir(), 'kv-'));
 const cacheFile = path.join(dir, '.keys-vault.enc');
 const seen: { url: string; key: string; body?: any }[] = [];
 
-function installFetch(opts: { hubDown?: boolean; usageDown?: boolean; backupModel?: string } = {}) {
+type ClaudeKey = { id: string; secret: string; model?: string };
+
+function installFetch(opts: { hubDown?: boolean; usageDown?: boolean; backupModel?: string; claude?: ClaudeKey[] } = {}) {
   (globalThis as any).fetch = async (url: string, init?: any) => {
-    const key = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '').replace('Bearer ', '');
+    const key = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? init?.headers?.['x-api-key'] ?? '').replace('Bearer ', '');
     seen.push({ url, key, body: init?.body ? JSON.parse(init.body) : undefined });
     if (url.includes('/api/platform-keys/v1/keys')) {
       if (opts.hubDown) throw new Error('hub down');
@@ -25,12 +27,20 @@ function installFetch(opts: { hubDown?: boolean; usageDown?: boolean; backupMode
           { id: 'k2', provider: 'openai', label: 'Backup', secret: 'sk-good', config: opts.backupModel ? { model: opts.backupModel } : {} },
         ],
         TELNYX_API_KEY: [{ id: 't1', provider: 'telnyx', label: 'Calls', secret: 'KEY-vault', config: {} }],
+        ...(opts.claude ? { ANTHROPIC_API_KEY: opts.claude.map((c) => ({ id: c.id, provider: 'anthropic', label: c.id, secret: c.secret, config: c.model ? { model: c.model } : {} })) } : {}),
       } }), { status: 200 });
     }
     if (url.includes('/api/platform-keys/v1/usage')) {
       if (opts.usageDown) return new Response('down', { status: 503 });
     }
     if (url.includes('/api/platform-keys/v1/usage')) return new Response('{"accepted":1}', { status: 200 });
+    if (url === 'https://api.anthropic.com/v1/messages') {
+      if (key === 'ant-bad') return new Response('{"type":"error","error":{"type":"authentication_error"}}', { status: 401 });
+      if (key === 'ant-busy') return new Response('{"type":"error","error":{"type":"rate_limit_error"}}', { status: 429 });
+      if (key === 'ant-down') return new Response('{"type":"error","error":{"type":"overloaded_error"}}', { status: 529 });
+      if (key === 'ant-slow') throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Hello ' }, { type: 'text', text: 'from Claude' }], usage: { input_tokens: 100, output_tokens: 20 } }), { status: 200 });
+    }
     if (key === 'sk-bad') return new Response('{"error":{"message":"Incorrect API key"}}', { status: 401 });
     if (key === 'sk-down') return new Response('overloaded', { status: 503 });
     return new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }), { status: 200 });
@@ -84,11 +94,11 @@ describe('wants + task names', () => {
   it('sends every name asked for, sorted, de-duplicated and URL-encoded', async () => {
     const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
     await v.fetchNow();
-    assert.ok(seen[0].url.endsWith('/api/platform-keys/v1/keys?wants=OPENAI_API_KEY,TELNYX_API_KEY'));
+    assert.ok(seen[0].url.endsWith('/api/platform-keys/v1/keys?wants=ANTHROPIC_API_KEY,OPENAI_API_KEY,TELNYX_API_KEY'));
     v.key('ZED_KEY', 'own'); v.keys('A B'); v.pool('ZED_KEY');
     seen.length = 0;
     await v.fetchNow();
-    assert.ok(seen[0].url.endsWith('?wants=A%20B,OPENAI_API_KEY,TELNYX_API_KEY,ZED_KEY'));
+    assert.ok(seen[0].url.endsWith('?wants=A%20B,ANTHROPIC_API_KEY,OPENAI_API_KEY,TELNYX_API_KEY,ZED_KEY'));
   });
 
   it('keeps usage per task and retries it after a failed report', async () => {
@@ -177,5 +187,93 @@ describe('AI fail-over', () => {
     await new AiService(svc).chat([{ role: 'user', content: 'hi' }]);
     assert.equal(seen[0].url, 'https://llm.example.com/v1/chat/completions');
     assert.equal(seen[0].body.model, 'm1');
+  });
+});
+
+describe('Claude (vault ANTHROPIC_API_KEY)', () => {
+  beforeEach(() => { seen.length = 0; rmSync(cacheFile, { force: true }); });
+
+  async function setup(claude: ClaudeKey[] | undefined, ai: Record<string, any> = { apiKey: 'sk-stored', model: 'gpt-4o-mini' }) {
+    installFetch({ claude });
+    const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
+    await v.fetchNow();
+    const { svc } = settingsWith(v, { ai });
+    seen.length = 0;
+    return { v, ai: new AiService(svc, v) };
+  }
+  const calls = () => seen.filter((s) => !s.url.includes('/api/platform-keys/'));
+
+  it('answers with Claude before any OpenAI key, using the key\'s model and the Messages API shape', async () => {
+    const { ai } = await setup([{ id: 'a1', secret: 'ant-good', model: 'claude-sonnet-5-5' }]);
+    const out = await ai.chat([{ role: 'assistant', content: 'Hi! How can I help?' }, { role: 'user', content: 'hi' }, { role: 'user', content: 'again' }]);
+    assert.deepEqual(out, { reply: 'Hello from Claude' });
+    assert.equal(calls().length, 1);
+    const [c] = calls();
+    assert.equal(c.url, 'https://api.anthropic.com/v1/messages');
+    assert.equal(c.key, 'ant-good');
+    assert.equal(c.body.model, 'claude-sonnet-5-5');
+    assert.ok(c.body.system.startsWith('You are SnappyConnect AI Assistant'));
+    assert.deepEqual(c.body.messages, [{ role: 'user', content: 'hi\n\nagain' }]);
+    assert.ok(c.body.max_tokens > 0);
+  });
+
+  it('sends anthropic-version and defaults to claude-haiku-5-5 when the key has no model', async () => {
+    const { ai } = await setup([{ id: 'a1', secret: 'ant-good' }]);
+    let headers: any;
+    const inner = (globalThis as any).fetch;
+    (globalThis as any).fetch = async (url: string, init?: any) => { if (url.includes('anthropic')) headers = init.headers; return inner(url, init); };
+    await ai.chat([{ role: 'user', content: 'hi' }]);
+    assert.equal(headers['anthropic-version'], '2023-06-01');
+    assert.equal(headers['x-api-key'], 'ant-good');
+    assert.equal(calls()[0].body.model, 'claude-haiku-5-5');
+  });
+
+  it('fails over across Anthropic keys in vault order; 401 is reported invalid', async () => {
+    const { v, ai } = await setup([{ id: 'a1', secret: 'ant-bad' }, { id: 'a2', secret: 'ant-busy' }, { id: 'a3', secret: 'ant-good' }]);
+    const out = await ai.chat([{ role: 'user', content: 'hi' }]);
+    assert.equal(out.reply, 'Hello from Claude');
+    assert.deepEqual(calls().map((s) => s.key), ['ant-bad', 'ant-busy', 'ant-good']);
+    await v.flushUsage();
+    const reports = seen.find((s) => s.url.endsWith('/usage'))!.body.reports;
+    assert.equal(reports.find((r: any) => r.key_id === 'a1').status, 'invalid');
+    assert.equal(reports.find((r: any) => r.key_id === 'a2').status, 'rate_limited');
+  });
+
+  it('when every Claude key fails (401, overloaded, timeout) the OpenAI path answers', async () => {
+    const { ai } = await setup([{ id: 'a1', secret: 'ant-bad' }, { id: 'a2', secret: 'ant-down' }, { id: 'a3', secret: 'ant-slow' }]);
+    const out = await ai.chat([{ role: 'user', content: 'hi' }]);
+    assert.equal(out.reply, 'OK');
+    assert.deepEqual(calls().map((s) => s.key), ['ant-bad', 'ant-down', 'ant-slow', 'sk-bad', 'sk-good']);
+  });
+
+  it('the admin\'s custom_llm still goes first', async () => {
+    installFetch({ claude: [{ id: 'a1', secret: 'ant-good' }] });
+    const v = new KeysVaultService(configOf({ KEYS_VAULT_TOKEN: 'spk_test', KEYS_VAULT_CACHE: cacheFile }));
+    await v.fetchNow();
+    (v as any).snapshot.keys.CUSTOM_LLM = [{ id: 'c1', provider: 'custom_llm', label: 'Own', secret: 'sk-custom', config: { base_url: 'https://llm.example.com/v1/', model: 'm1' } }];
+    const { svc } = settingsWith(v, { ai: { apiKey: 'sk-stored' } });
+    seen.length = 0;
+    const out = await new AiService(svc, v).chat([{ role: 'user', content: 'hi' }]);
+    assert.equal(out.reply, 'OK');
+    assert.deepEqual(calls().map((s) => s.url), ['https://llm.example.com/v1/chat/completions']);
+  });
+
+  it('with no Anthropic key in the vault no Claude request is made', async () => {
+    const { ai } = await setup(undefined);
+    await ai.chat([{ role: 'user', content: 'hi' }]);
+    assert.ok(!seen.some((s) => s.url.includes('anthropic')));
+    assert.deepEqual(calls().map((s) => s.key), ['sk-bad', 'sk-good']);
+  });
+
+  it('reports usage at the Claude model with Claude\'s token counts and task assistant_chat', async () => {
+    const { v, ai } = await setup([{ id: 'a1', secret: 'ant-good', model: 'claude-opus-5-5' }]);
+    await ai.chat([{ role: 'user', content: 'hi' }]);
+    await v.flushUsage();
+    const reports = seen.find((s) => s.url.endsWith('/usage'))!.body.reports;
+    const a1 = reports.find((r: any) => r.key_id === 'a1');
+    assert.equal(a1.task, 'assistant_chat');
+    assert.equal(a1.input_tokens, 100);
+    assert.equal(a1.output_tokens, 20);
+    assert.equal(a1.cost_usd, Number(((100 * 4 + 20 * 20) / 1_000_000).toFixed(6)));
   });
 });

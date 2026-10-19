@@ -24,9 +24,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
  * that key. Calls made with that key use it (see modelFor); keys without one
  * keep the code's model.
  *
- * Covers third-party PROVIDER keys only: the AI key (with fail-over) and the
- * Telnyx API key (primary only — Telnyx connections and numbers belong to one
- * account). Our own equipment and secrets — Grandstream, Dinstar, Asterisk,
+ * Covers third-party PROVIDER keys only: the AI keys (Anthropic + OpenAI, with
+ * fail-over) and the Telnyx API key (primary only — Telnyx connections and
+ * numbers belong to one account). Our own equipment and secrets — Grandstream, Dinstar, Asterisk,
  * SIP passwords, JWT, the settings encryption key — stay where they are.
  *
  * INERT without KEYS_VAULT_TOKEN: every accessor returns nothing and
@@ -50,7 +50,7 @@ export type KeyOutcome =
 
 /** USD per million tokens for the models SnappyConnect calls (published rates). */
 /** Variable names SnappyConnect's code reads from the vault even before it first asks. */
-const STATIC_WANTS = ['TELNYX_API_KEY', 'OPENAI_API_KEY'];
+const STATIC_WANTS = ['TELNYX_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];
 
 /** The hub's task-name rule: lower-case [a-z0-9_.:-], at most 40 characters; '' when unusable. */
 export function cleanTask(task: string | undefined): string {
@@ -72,6 +72,9 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'gpt-4.1': { in: 2, out: 8 },
   'deepseek-chat': { in: 0.27, out: 1.1 },
   'gemini-2.5-flash': { in: 0.3, out: 2.5 },
+  'claude-haiku-5-5': { in: 0.1, out: 0.5 },
+  'claude-sonnet-5-5': { in: 2, out: 10 },
+  'claude-opus-5-5': { in: 4, out: 20 },
 };
 
 
