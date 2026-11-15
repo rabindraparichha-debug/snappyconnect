@@ -14,7 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { Repository } from 'typeorm';
 import { CallLog } from '../calls/call-log.entity';
 import { Public } from '../common/decorators/public.decorator';
-import { buildPage, clampLimit, decodeCursor, FeedRow } from './universe-calls';
+import { buildPage, clampLimit, decodeCursor, FeedRow, numberTagKey } from './universe-calls';
 import { verifyUniverseServiceToken } from './universe-token';
 
 /**
@@ -24,7 +24,9 @@ import { verifyUniverseServiceToken } from './universe-token';
  * Every call, every user, oldest change first, keyset-paged on
  * (updatedAt, id): a disposition set after the call re-delivers the row.
  * Contact details, notes, transcripts and recordings never leave here (see
- * FeedCall in universe-calls.ts).
+ * FeedCall in universe-calls.ts). The dialled number is read ONLY to compute
+ * numberTag, a keyed hash the ATS matches against candidates a recruiter
+ * unlocked; the number itself is never put on the response.
  *
  * @Public only switches off the SnappyConnect session guard; the route is
  * closed by the universe service token, exactly like /universe/people.
@@ -77,6 +79,7 @@ export class UniverseCallsController {
               c.source::text      as source,
               c."startedAt",
               c."endedAt",
+              c."phoneNumber",
               to_char(c."updatedAt" at time zone 'UTC',
                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorTs"
          from call_logs c
@@ -88,6 +91,6 @@ export class UniverseCallsController {
       [cursor?.t ?? null, cursor?.i ?? null, limit + 1],
     );
 
-    return buildPage(rows, limit);
+    return buildPage(rows, limit, numberTagKey(secret));
   }
 }

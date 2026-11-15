@@ -16,6 +16,9 @@ import {
   FEED_DEFAULT_LIMIT,
   FEED_MAX_LIMIT,
   FeedRow,
+  numberTag,
+  numberTagKey,
+  TAG_CHECK_INPUT,
   toFeedCall,
 } from './universe-calls';
 import { UniverseCallsController } from './universe-calls.controller';
@@ -130,6 +133,43 @@ describe('universe calls page', () => {
   });
 });
 
+describe('universe calls number tag', () => {
+  // The same vector is asserted in the ATS repo (scripts/test-recruiter-watch.ts):
+  // if the two ever disagree, every call reads as "not a candidate we know".
+  const key = numberTagKey('test-universe-secret-0123456789');
+  it('matches the fixed vector shared with the ATS', () => {
+    assert.equal(numberTag('+1 (415) 555-0101', key), '7fbaece60c4aefd739122f408ff88ff3');
+  });
+  it('ignores formatting and the country code', () => {
+    const t = numberTag('+1 (415) 555-0101', key);
+    assert.equal(numberTag('4155550101', key), t);
+    assert.equal(numberTag('415.555.0101', key), t);
+    assert.equal(numberTag('+971 50 123 4567', key), numberTag('050 123 4567', key));
+    assert.notEqual(numberTag('+1 415 555 0102', key), t);
+  });
+  it('no tag for a missing or too-short number, and a different secret gives a different tag', () => {
+    assert.equal(numberTag(null, key), null);
+    assert.equal(numberTag('12345', key), null);
+    assert.notEqual(numberTag('4155550101', numberTagKey('other')), numberTag('4155550101', key));
+  });
+  it('the feed carries the tag and the key check, never the number', () => {
+    const page = buildPage(
+      [row(ID_A, '2026-10-01T10:00:00.000001Z', { phoneNumber: '+1 (415) 555-0101' })],
+      5,
+      key,
+    );
+    assert.equal(page.calls[0].numberTag, '7fbaece60c4aefd739122f408ff88ff3');
+    assert.equal(page.tagCheck, numberTag(TAG_CHECK_INPUT, key));
+    assert.equal(JSON.stringify(page).includes('555'), false, 'no digits of the number on the feed');
+    assert.equal('phoneNumber' in page.calls[0], false);
+  });
+  it('without a key there is no tag and no check', () => {
+    const page = buildPage([row(ID_A, '2026-10-01T10:00:00.000001Z', { phoneNumber: '+14155550101' })], 5);
+    assert.equal(page.calls[0].numberTag, null);
+    assert.equal(page.tagCheck, null);
+  });
+});
+
 describe('GET /universe/calls', () => {
   it('503 when the secret is not configured', async () => {
     const { c } = controller([], '');
@@ -151,6 +191,16 @@ describe('GET /universe/calls', () => {
     assert.deepEqual(seen[0].params, [null, null, 11]);
     assert.equal(page.calls.length, 1);
     assert.equal(page.hasMore, false);
+  });
+  it('selects the number only to tag it', async () => {
+    const { c, seen } = controller([
+      row(ID_A, '2026-10-01T10:00:00.000001Z', { phoneNumber: '+1 (415) 555-0101' }),
+    ]);
+    const page = await c.feed(`Bearer ${goodToken()}`);
+    assert.match(seen[0].sql, /c\."phoneNumber"/);
+    assert.match(page.calls[0].numberTag ?? '', /^[0-9a-f]{32}$/);
+    assert.equal(page.tagCheck, numberTag(TAG_CHECK_INPUT, numberTagKey(SECRET)));
+    assert.equal(JSON.stringify(page).includes('4155550101'), false);
   });
   it('a cursor is passed through to the keyset comparison', async () => {
     const { c, seen } = controller([]);
